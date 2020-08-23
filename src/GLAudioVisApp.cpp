@@ -74,7 +74,7 @@ GLAudioVisApp::~GLAudioVisApp()
 		if (m_audioThreadActive)
 		{
 			m_audioThreadActive = false;
-			m_audioThread.join();
+			// m_audioThread.join();
 		}
 
 		pa_simple_free(m_audioSource);
@@ -195,7 +195,7 @@ bool GLAudioVisApp::initPulseAudioSource()
 	// Specify the sample format, should be possible to determine this from `pacmd list-sources`?
 	pa_sample_spec sampleFormat;
 	sampleFormat.format = PA_SAMPLE_FLOAT32LE; // PA_SAMPLE_S16LE; // 2 byte sample
-	sampleFormat.channels = 1;
+	sampleFormat.channels = 2;
 	// sampleFormat.rate = 44100;
 	sampleFormat.rate = 48000;
 
@@ -204,7 +204,6 @@ bool GLAudioVisApp::initPulseAudioSource()
 	// ba.tlength = (uint32_t)-1; // target buffer length (bytes) ?  playback only?
 	// ba.minreq = 1024; // minimum request ?
 	// ba.fragsize = 1024; // fragment size (bytes) recording only?
-
 
 	// const std::string source = "alsa_input.pci-0000_00_1b.0.analog-stereo";
 	const std::string source = "alsa_output.pci-0000_00_1b.0.analog-stereo.monitor";
@@ -381,17 +380,34 @@ void GLAudioVisApp::drawGUI()
 			toggleRecording();
 		}
 
+		// Cast the start of the buffer to a float array, since that's what ImGui needs to plot lines, and sizeof(float)
+		// matches m_bytesPerSample
+		const float* buf = reinterpret_cast<float*>(m_audioSampleBuffer.data());
+
+		// Left and Right sample data is interleaved - Left starts at [0], Right starts at [1], 2 element stride
 		ImGui::PlotLines(
 			"##AudioSamples",
-			reinterpret_cast<float*>(m_audioSampleBuffer.data()),
-			m_numAudioSamples,
+			&buf[0],
+			m_numAudioSamples / 2,
 			0,
-			"Raw PCM",
+			"Raw PCM (L)",
 			-1.0f,
 			1.0f,
-			ImVec2(0,80)
+			ImVec2(0,80),
+			sizeof(float) * 2 // stride
 		);
 
+		ImGui::PlotLines(
+			"##AudioSamples",
+			&buf[1],
+			m_numAudioSamples / 2,
+			0,
+			"Raw PCM (R)",
+			-1.0f,
+			1.0f,
+			ImVec2(0,80),
+			sizeof(float) * 2 // stride
+		);
 	}
 
 	ImGui::End();

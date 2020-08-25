@@ -16,6 +16,7 @@ file(GLOB_RECURSE sources CONFIGURE_DEPENDS src/*.cpp)
 # executable
 add_executable(GLAudioVisApp ${sources})
 target_compile_options(GLAudioVisApp PRIVATE -O3 -Wall -Wextra -Werror)
+# target_compile_options(GLAudioVisApp PRIVATE -Wall -Wextra -Werror)
 
 # libpthread
 find_package(Threads REQUIRED)
@@ -31,7 +32,6 @@ find_package(OpenGL REQUIRED)
 
 # find PulseAudio
 find_package(PulseAudio REQUIRED)
-
 
 find_package(GLEW REQUIRED)
 include_directories(${GLEW_INCLUDE_DIRS})

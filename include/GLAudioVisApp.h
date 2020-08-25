@@ -27,21 +27,17 @@ private:
 		m_glContext{nullptr},
 		m_imGuiContext{nullptr},
 		m_audioSource{nullptr},
-		m_bytesPerSample{1}, // char
-		m_numAudioSamples{1024},
 		m_audioSampleBuffer{},
 		m_audioThreadActive{false},
-		m_audioThread{},
-		m_dftPlanLeft{nullptr},
-		m_dftPlanRight{nullptr},
-		m_fftInputLeft{},
-		m_fftInputRight{},
-		m_fftOutputLeft{nullptr},
-		m_fftOutputRight{nullptr},
-		m_fftOutputLeftRaw{},
-		m_fftOutputRightRaw{},
-		m_leftSampleBuckets{},
-		m_rightSampleBuckets{},
+		// m_audioThread{},
+		m_audioSamplingSettings
+		{
+			2, // numChannels
+			48000, // sampleRate
+			1024, // numSamples
+			PA_SAMPLE_FLOAT32LE, // sample format
+		},
+		m_processedAudioData{},
 		m_histogramSmoothing{0.0f}
 	{
 		fmt::print("GLAudioVisApp()\n");
@@ -101,21 +97,39 @@ private:
 	// PulseAudio audio source connection
 	pa_simple* m_audioSource;
 
-	unsigned int m_bytesPerSample;
-	unsigned int m_numAudioSamples;
 	std::vector<char> m_audioSampleBuffer; // use char here, as 1 byte
 	bool m_audioThreadActive;
-	std::thread m_audioThread;
+	// std::thread m_audioThread;
 
-	fftw_plan m_dftPlanLeft, m_dftPlanRight;
-	std::vector<double> m_fftInputLeft, m_fftInputRight;
-	fftw_complex* m_fftOutputLeft;
-	fftw_complex* m_fftOutputRight;
-	std::vector<float> m_fftOutputLeftRaw, m_fftOutputRightRaw;
+	struct AudioSamplingSettings
+	{
+		const unsigned int numChannels; // 1 mono, 2 stereo
+		const unsigned int sampleRate; // samples per second
+		const unsigned int numSamples; // number of samples or 'frames'
+		const pa_sample_format_t sampleFormat; // the size of a sample
+	} m_audioSamplingSettings;
+
+	enum struct AudioChannel
+	{
+		Left = 0,
+		Right = 1
+	};
 
 	static constexpr size_t s_numBuckets = 5;
-	std::array<float, s_numBuckets> m_leftSampleBuckets;
-	std::array<float, s_numBuckets> m_rightSampleBuckets;
+
+	struct AudioProcessData
+	{
+		AudioChannel channelID;
+		// internal data for fftW
+		std::vector<double> fftwInput;
+		fftw_complex* fftwOutput;
+		fftw_plan fftwPlan;
+		// Processed output data
+		std::vector<float> dftOutputRaw;
+		std::array<float, s_numBuckets> spectrumBuckets;
+	};
+
+	std::vector<AudioProcessData> m_processedAudioData;
 
 	float m_histogramSmoothing;
 };

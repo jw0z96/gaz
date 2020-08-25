@@ -89,11 +89,11 @@ GLAudioVisApp::~GLAudioVisApp()
 		pa_simple_free(m_audioSource);
 	}
 
-	fftw_free(m_fftOutputLeft);
-	fftw_free(m_fftOutputRight);
-
-	fftw_destroy_plan(m_dftPlanLeft);
-	fftw_destroy_plan(m_dftPlanRight);
+	for (const auto &processedAudioData : m_processedAudioData)
+	{
+		fftw_free(processedAudioData.fftwOutput);
+		fftw_destroy_plan(processedAudioData.fftwPlan);
+	}
 }
 
 bool GLAudioVisApp::init()
@@ -209,10 +209,10 @@ bool GLAudioVisApp::initPulseAudioSource()
 {
 	// Specify the sample format, should be possible to determine this from `pacmd list-sources`?
 	pa_sample_spec sampleFormat;
-	sampleFormat.format = PA_SAMPLE_FLOAT32LE; // PA_SAMPLE_S16LE; // 2 byte sample
-	sampleFormat.channels = 2;
-	// sampleFormat.rate = 44100;
-	sampleFormat.rate = 48000;
+
+	sampleFormat.format = m_audioSamplingSettings.sampleFormat;
+	sampleFormat.channels = m_audioSamplingSettings.numChannels;
+	sampleFormat.rate = m_audioSamplingSettings.sampleRate;
 
 	// pa_buffer_attr ba;
 	// ba.maxlength = 1024; // max length of the buffer
@@ -220,6 +220,7 @@ bool GLAudioVisApp::initPulseAudioSource()
 	// ba.minreq = 1024; // minimum request ?
 	// ba.fragsize = 1024; // fragment size (bytes) recording only?
 
+	// TODO: command line option
 	// const std::string source = "alsa_input.pci-0000_00_1b.0.analog-stereo";
 	const std::string source = "alsa_output.pci-0000_00_1b.0.analog-stereo.monitor";
 
@@ -247,33 +248,29 @@ bool GLAudioVisApp::initPulseAudioSource()
 		return false;
 	}
 
-	m_bytesPerSample = pa_sample_size(&sampleFormat); // should be 4 bytes as we request 32 bit float
-
 	// resize the buffer to accomodate for the read size (bytes)
-	m_audioSampleBuffer.clear();
-	// m_numAudioSamples = sampleFormat.rate; // 1 sec of audio samples
-	const size_t bufferSize = m_bytesPerSample * m_numAudioSamples * sampleFormat.channels;
+	// m_audioSamplingSettings.numSamples = sampleFormat.rate; // 1 sec of audio samples
+	const size_t bufferSize = pa_sample_size_of_format(m_audioSamplingSettings.sampleFormat) * m_audioSamplingSettings.numSamples * m_audioSamplingSettings.numChannels;
 	fmt::print("buffer size: {}\n", bufferSize);
 	m_audioSampleBuffer.resize(bufferSize);
 
-	m_fftInputLeft.clear();
-	m_fftInputLeft.resize(m_numAudioSamples);
-
-	m_fftInputRight.clear();
-	m_fftInputRight.resize(m_numAudioSamples);
-
-	m_fftOutputLeft = fftw_alloc_complex(sizeof(fftw_complex) * m_numAudioSamples);
-	m_fftOutputRight = fftw_alloc_complex(sizeof(fftw_complex) * m_numAudioSamples);
-
-	m_fftOutputLeftRaw.clear();
-	m_fftOutputLeftRaw.resize(m_numAudioSamples / 2);
-
-	m_fftOutputRightRaw.clear();
-	m_fftOutputRightRaw.resize(m_numAudioSamples / 2);
-
-
-	m_dftPlanLeft = fftw_plan_dft_r2c_1d(m_numAudioSamples, m_fftInputLeft.data(), m_fftOutputLeft, FFTW_PATIENT | FFTW_DESTROY_INPUT);
-	m_dftPlanRight = fftw_plan_dft_r2c_1d(m_numAudioSamples, m_fftInputRight.data(), m_fftOutputRight, FFTW_PATIENT | FFTW_DESTROY_INPUT);
+	// Since we need to keep the references passed to fftwPlan intact, default construct 'numchannels' elements,
+	// then fill them
+	m_processedAudioData.resize(m_audioSamplingSettings.numChannels);
+	for (size_t i = 0; i < m_audioSamplingSettings.numChannels; ++i)
+	{
+		AudioProcessData& data = m_processedAudioData[i];
+		data.channelID = static_cast<AudioChannel>(i);
+		// Prepare data for fftw
+		data.fftwInput.resize(m_audioSamplingSettings.numSamples);
+		data.fftwOutput = fftw_alloc_complex(sizeof(fftw_complex) * m_audioSamplingSettings.numSamples);
+		data.fftwPlan = fftw_plan_dft_r2c_1d(
+			m_audioSamplingSettings.numSamples, data.fftwInput.data(), data.fftwOutput, FFTW_PATIENT | FFTW_DESTROY_INPUT
+		);
+		// Allocate vectors that are used by ImGui
+		data.dftOutputRaw.resize(m_audioSamplingSettings.numSamples / 2);
+		data.spectrumBuckets.fill(0.0f);
+	}
 
 	return true;
 }
@@ -282,6 +279,7 @@ void GLAudioVisApp::run()
 {
 	// main loop
 	SDL_Event event;
+	const auto& mainWindowRaw = m_mainWindow->get();
 	while (true)
 	{
 		const auto start = std::chrono::system_clock::now();
@@ -300,6 +298,7 @@ void GLAudioVisApp::run()
 			processEvent(event);
 		}
 
+		// Capture audio and perform FFT
 		processAudio();
 
 		// our opengl render
@@ -307,15 +306,17 @@ void GLAudioVisApp::run()
 
 		// Start the ImGui frame
 		ImGui_ImplOpenGL3_NewFrame();
-		ImGui_ImplSDL2_NewFrame(m_mainWindow->get());
+		ImGui_ImplSDL2_NewFrame(mainWindowRaw);
 		ImGui::NewFrame();
+
 		// Populate the ImGui frame with scene info
 		drawGUI();
+
 		// Draw the ImGui frame
 		ImGui::Render();
 		ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
-		SDL_GL_SwapWindow(m_mainWindow->get());
+		SDL_GL_SwapWindow(mainWindowRaw);
 
 		const auto end = std::chrono::system_clock::now();
 		runLoopElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
@@ -345,64 +346,60 @@ void GLAudioVisApp::processAudio()
 
 		const auto endTime2 = std::chrono::system_clock::now();
 
-		// unpack the stereo data into the input arrays, reinterpret as float array as it matches the sample size
-		const float* buf = reinterpret_cast<float*>(m_audioSampleBuffer.data());
-		for (unsigned int i = 0; i < m_numAudioSamples; ++i)
+		// If we have more than 1 channel, unpack into the different data channels
+		const size_t numChannels = m_processedAudioData.size();
+		if (numChannels > 1)
 		{
-			m_fftInputLeft[i] = buf[2 * i + 0];
-			m_fftInputRight[i] = buf[2 * i + 1];
+			// reinterpret as float array as it should match the sample size
+			assert(sizeof(float) == pa_sample_size_of_format(m_audioSamplingSettings.sampleFormat));
+			const float* buf = reinterpret_cast<float*>(m_audioSampleBuffer.data());
+			for (unsigned int i = 0; i < m_audioSamplingSettings.numSamples; ++i)
+			{
+				for (size_t j = 0; j < numChannels; ++j)
+				{
+					m_processedAudioData[j].fftwInput[i] = buf[numChannels * i + j];
+				}
+			}
 		}
+
+		// used for determining approx frequencies from the DFT sample index
+		static const float reciprocal = static_cast<float>(m_audioSamplingSettings.sampleRate) / static_cast<float>(m_audioSamplingSettings.numSamples);
 
 		// put these on seperate threads?
-		fftw_execute(m_dftPlanLeft);
-		fftw_execute(m_dftPlanRight);
-
-		// first lower the values in the buckets by the smoothing factor
-		for (size_t j = 0; j < s_numBuckets; ++j)
+		for (auto& fftData : m_processedAudioData)
 		{
-			m_leftSampleBuckets[j] *= m_histogramSmoothing;
-			m_rightSampleBuckets[j] *= m_histogramSmoothing;
-		}
+			// run the DFT
+			fftw_execute(fftData.fftwPlan);
 
-		static const float reciprocal = 48000.0f / static_cast<float>(m_numAudioSamples);
-
-		for (unsigned int i = 0; i < (m_numAudioSamples / 2); ++i) // we only care about half the samples?
-		{
-			const fftw_complex& sampleLeft = m_fftOutputLeft[i];
-			const float amplitudeLeft = sqrt(sampleLeft[0] * sampleLeft[0] + sampleLeft[1] * sampleLeft[1]);
-			// const float amplitudeLeft = sampleLeft[0] + sampleLeft[1]; // no need to sqrt
-			const float freqLeft = static_cast<float>(i) * reciprocal;
-
-			m_fftOutputLeftRaw[i] = amplitudeLeft;
-
-			for (size_t j = 0; j < s_numBuckets; ++j)
+			// first lower the values in the buckets by the smoothing factor
+			for (auto& bucket : fftData.spectrumBuckets)
 			{
-				if (freqLeft > freqBuckets[j] && freqLeft < freqBuckets[j + 1])
+				bucket *= m_histogramSmoothing;
+			}
+
+			// we only care about samples in the DFT that are below the nyquist frequency (midpoint)
+			for (unsigned int i = 0; i < (m_audioSamplingSettings.numSamples / 2); ++i)
+			{
+				const fftw_complex& sample = fftData.fftwOutput[i];
+				const float amplitude = sqrt(sample[0] * sample[0] + sample[1] * sample[1]);
+				// const float amplitude = sample[0] + sample[1]; // no need to sqrt
+				fftData.dftOutputRaw[i] = amplitude;
+
+				// Frequency is approximate, based on the sample size
+				const float freq = static_cast<float>(i) * reciprocal;
+				for (size_t j = 0; j < s_numBuckets; ++j)
 				{
-					m_leftSampleBuckets[j] = amplitudeLeft > m_leftSampleBuckets[j] ?
-						amplitudeLeft :
-						m_leftSampleBuckets[j];
-					break;
+					// freqBuckets is sized s_numBuckets + 1, so this is safe
+					if (freq > freqBuckets[j] && freq < freqBuckets[j + 1])
+					{
+						fftData.spectrumBuckets[j] = amplitude > fftData.spectrumBuckets[j] ?
+							amplitude :
+							fftData.spectrumBuckets[j];
+						break;
+					}
 				}
 			}
 
-			const fftw_complex& sampleRight = m_fftOutputRight[i];
-			const float amplitudeRight = sqrt(sampleRight[0] * sampleRight[0] + sampleRight[1] * sampleRight[1]);
-			// const float amplitudeRight = sampleRight[0] + sampleRight[1]; // no need to sqrt
-			const float freqRight = static_cast<float>(i) * reciprocal;
-
-			m_fftOutputRightRaw[i] = amplitudeRight;
-
-			for (size_t j = 0; j < s_numBuckets; ++j)
-			{
-				if (freqRight > freqBuckets[j] && freqRight < freqBuckets[j + 1])
-				{
-					m_rightSampleBuckets[j] = amplitudeRight > m_rightSampleBuckets[j] ?
-						amplitudeRight :
-						m_rightSampleBuckets[j];
-					break;
-				}
-			}
 		}
 
 		const auto endTime3 = std::chrono::system_clock::now();
@@ -476,10 +473,11 @@ void GLAudioVisApp::drawGUI()
 
 	ImGui::Separator();
 
-	ImGui::Text("Audio Sample Size: %u", m_bytesPerSample);
-	ImGui::Text("Audio Samples: %u", m_numAudioSamples);
+	ImGui::Text("Audio Sample Size: %lu", pa_sample_size_of_format(m_audioSamplingSettings.sampleFormat));
+	ImGui::Text("Audio Samples: %u", m_audioSamplingSettings.numSamples);
 
 	ImGui::Separator();
+
 	ImGui::Text("Run Loop Time: %.1fms", runLoopElapsed);
 	ImGui::Text("\tAudio Processing Time Total: %.1fms", audioProcessingTime1);
 	ImGui::Text("\t\tTime 1: %fms", audioProcessingTime2);
@@ -493,13 +491,14 @@ void GLAudioVisApp::drawGUI()
 
 		// Cast the start of the buffer to a float array, since that's what ImGui needs to plot lines, and sizeof(float)
 		// matches m_bytesPerSample
+		assert(sizeof(float) == pa_sample_size_of_format(m_audioSamplingSettings.sampleFormat));
 		const float* buf = reinterpret_cast<float*>(m_audioSampleBuffer.data());
 
 		// Left and Right sample data is interleaved - Left starts at [0], Right starts at [1], 2 element stride
 		ImGui::PlotLines(
 			"##AudioSamplesL",
 			&buf[0],
-			m_numAudioSamples / 2,
+			m_audioSamplingSettings.numSamples / 2,
 			0,
 			"Raw PCM (L)",
 			-1.0f,
@@ -511,7 +510,7 @@ void GLAudioVisApp::drawGUI()
 		ImGui::PlotLines(
 			"##AudioSamplesR",
 			&buf[1],
-			m_numAudioSamples / 2,
+			m_audioSamplingSettings.numSamples / 2,
 			0,
 			"Raw PCM (R)",
 			-1.0f,
@@ -520,51 +519,41 @@ void GLAudioVisApp::drawGUI()
 			sizeof(float) * 2 // stride
 		);
 
-		ImGui::PlotLines(
-			"##fftOutputLeftRaw",
-			m_fftOutputLeftRaw.data(),
-			m_fftOutputLeftRaw.size(),
-			0,
-			"Raw DFT (L)",
-			0.0f,
-			100.0f,
-			ImVec2(0, 80)
-		);
-
-		ImGui::PlotLines(
-			"##fftOutputRightRaw",
-			m_fftOutputRightRaw.data(),
-			m_fftOutputRightRaw.size(),
-			0,
-			"Raw DFT (R)",
-			0.0f,
-			100.0f,
-			ImVec2(0, 80)
-		);
+		for (const auto& fftData : m_processedAudioData)
+		{
+			ImGui::PlotLines(
+				fftData.channelID == AudioChannel::Left ?
+					"##fftOutputRawL" :
+					"##fftOutputRawR",
+				fftData.dftOutputRaw.data(),
+				fftData.dftOutputRaw.size(),
+				0,
+				fftData.channelID == AudioChannel::Left ?
+					"Raw DFT (L)" :
+					"Raw DFT (R)",
+				0.0f,
+				100.0f,
+				ImVec2(0, 80)
+			);
+		}
 
 		ImGui::SliderFloat("##Smoothing", &m_histogramSmoothing, 0.0f, 1.0f, "Histogram Smoothing: %.1f");
 
-		ImGui::PlotHistogram(
-			"##AudioHistogramL",
-			m_leftSampleBuckets.data(),
-			s_numBuckets,
-			0,
-			"Left",
-			0.0f,
-			100.0f,
-			ImVec2(0, 80.0f)
-		);
-
-		ImGui::PlotHistogram(
-			"##AudioHistogramR",
-			m_rightSampleBuckets.data(),
-			s_numBuckets,
-			0,
-			"Right",
-			0.0f,
-			100.0f,
-			ImVec2(0, 80.0f)
-		);
+		for (const auto& fftData : m_processedAudioData)
+		{
+			ImGui::PlotHistogram(
+				fftData.channelID == AudioChannel::Left ?
+					"##AudioHistogramL" :
+					"##AudioHistogramR",
+				fftData.spectrumBuckets.data(),
+				s_numBuckets,
+				0,
+				"",
+				0.0f,
+				100.0f,
+				ImVec2(0, 80.0f)
+			);
+		}
 	}
 
 	ImGui::End();

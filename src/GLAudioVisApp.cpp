@@ -9,12 +9,17 @@
 
 #include <pulse/error.h>
 
-#include "GLUtils/Timer.h"
+#include <chrono>
 
+#include "GLUtils/Timer.h"
 namespace
 {
 	constexpr unsigned int DEFAULT_SCREEN_WIDTH = 1024;
 	constexpr unsigned int DEFAULT_SCREEN_HEIGHT = 768;
+
+	constexpr float freqBuckets[] = { 20.0f, 140.0f, 400.0f, 2600.0f, 5200.0f, std::numeric_limits<float>::max() };
+
+	float audioProcessingTime = 0.0f;
 };
 
 int GLAudioVisApp::execute(int argc, char* argv[])
@@ -79,6 +84,12 @@ GLAudioVisApp::~GLAudioVisApp()
 
 		pa_simple_free(m_audioSource);
 	}
+
+	fftw_free(m_fftOutputLeft);
+	fftw_free(m_fftOutputRight);
+
+	fftw_destroy_plan(m_dftPlanLeft);
+	fftw_destroy_plan(m_dftPlanRight);
 }
 
 bool GLAudioVisApp::init()
@@ -236,10 +247,22 @@ bool GLAudioVisApp::initPulseAudioSource()
 
 	// resize the buffer to accomodate for the read size (bytes)
 	m_audioSampleBuffer.clear();
-	const size_t bufferSize = m_bytesPerSample * m_numAudioSamples;
+	// m_numAudioSamples = sampleFormat.rate; // 1 sec of audio samples
+	const size_t bufferSize = m_bytesPerSample * m_numAudioSamples * sampleFormat.channels;
 	fmt::print("buffer size: {}\n", bufferSize);
 	m_audioSampleBuffer.resize(bufferSize);
 
+	m_fftInputLeft.clear();
+	m_fftInputLeft.resize(m_numAudioSamples);
+
+	m_fftInputRight.clear();
+	m_fftInputRight.resize(m_numAudioSamples);
+
+	m_fftOutputLeft = fftw_alloc_complex(sizeof(fftw_complex) * m_numAudioSamples);
+	m_fftOutputRight = fftw_alloc_complex(sizeof(fftw_complex) * m_numAudioSamples);
+
+	m_dftPlanLeft = fftw_plan_dft_r2c_1d(m_numAudioSamples, m_fftInputLeft.data(), m_fftOutputLeft, FFTW_PATIENT | FFTW_DESTROY_INPUT);
+	m_dftPlanRight = fftw_plan_dft_r2c_1d(m_numAudioSamples, m_fftInputRight.data(), m_fftOutputRight, FFTW_PATIENT | FFTW_DESTROY_INPUT);
 
 	return true;
 }
@@ -290,6 +313,9 @@ void GLAudioVisApp::processEvent(const SDL_Event&)
 void GLAudioVisApp::processAudio()
 {
 	int error;
+
+	const auto startTime = std::chrono::system_clock::now();
+
 	/*
 	fmt::print("GLAudioVisApp::processAudio: Started...\n");
 
@@ -301,11 +327,70 @@ void GLAudioVisApp::processAudio()
 			if (pa_simple_read(m_audioSource, m_audioSampleBuffer.data(), m_audioSampleBuffer.size(), &error) < 0)
 			{
 				fmt::print("GLAudioVisApp::processAudio: Failed to read: {}\n", pa_strerror(error));
-				// return;
+				return;
+			}
+
+			// unpack the stereo data into the input arrays, reinterpret as float array as it matches the sample size
+			const float* buf = reinterpret_cast<float*>(m_audioSampleBuffer.data());
+			for (unsigned int i = 0; i < m_numAudioSamples; ++i)
+			{
+				m_fftInputLeft[i] = buf[2 * i + 0];
+				m_fftInputRight[i] = buf[2 * i + 1];
+			}
+
+			// put these on seperate threads?
+			fftw_execute(m_dftPlanLeft);
+			fftw_execute(m_dftPlanRight);
+
+			// first lower the values in the buckets by the smoothing factor
+			for (size_t j = 0; j < s_numBuckets; ++j)
+			{
+				m_leftSampleBuckets[j] *= m_histogramSmoothing;
+				m_rightSampleBuckets[j] *= m_histogramSmoothing;
+			}
+
+			static const float reciprocal = 48000.0f / static_cast<float>(m_numAudioSamples);
+
+			for (unsigned int i = 0; i < (m_numAudioSamples / 2); ++i) // we only care about half the samples?
+			{
+				const fftw_complex& sampleLeft = m_fftOutputLeft[i];
+				const float amplitudeLeft = sqrt(sampleLeft[0] * sampleLeft[0] + sampleLeft[1] * sampleLeft[1]);
+				const float freqLeft = static_cast<float>(i) * reciprocal;
+
+				for (size_t j = 0; j < s_numBuckets; ++j)
+				{
+					if (freqLeft > freqBuckets[j] && freqLeft < freqBuckets[j + 1])
+					{
+						m_leftSampleBuckets[j] = amplitudeLeft > m_leftSampleBuckets[j] ?
+							amplitudeLeft :
+							m_leftSampleBuckets[j];
+						break;
+					}
+				}
+
+				const fftw_complex& sampleRight = m_fftOutputRight[i];
+				const float amplitudeRight = sqrt(sampleRight[0] * sampleRight[0] + sampleRight[1] * sampleRight[1]);
+				const float freqRight = static_cast<float>(i) * reciprocal;
+
+				for (size_t j = 0; j < s_numBuckets; ++j)
+				{
+					if (freqRight > freqBuckets[j] && freqRight < freqBuckets[j + 1])
+					{
+						m_rightSampleBuckets[j] = amplitudeRight > m_rightSampleBuckets[j] ?
+							amplitudeRight :
+							m_rightSampleBuckets[j];
+						break;
+					}
+				}
 			}
 		}
+
+		const auto endTime = std::chrono::system_clock::now();
+		audioProcessingTime = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime).count();
+
 		/*
 	}
+
 
 	fmt::print("GLAudioVisApp::processAudio: Ended...\n");
 	*/
@@ -373,6 +458,7 @@ void GLAudioVisApp::drawGUI()
 
 	ImGui::Text("Audio Sample Size: %u", m_bytesPerSample);
 	ImGui::Text("Audio Samples: %u", m_numAudioSamples);
+	ImGui::Text("Audio Processing Time: %.1fms", audioProcessingTime);
 
 	{
 		if (ImGui::Button(!m_audioThreadActive ? "Start Recording" : "Stop Recording"))
@@ -386,7 +472,7 @@ void GLAudioVisApp::drawGUI()
 
 		// Left and Right sample data is interleaved - Left starts at [0], Right starts at [1], 2 element stride
 		ImGui::PlotLines(
-			"##AudioSamples",
+			"##AudioSamplesL",
 			&buf[0],
 			m_numAudioSamples / 2,
 			0,
@@ -398,7 +484,7 @@ void GLAudioVisApp::drawGUI()
 		);
 
 		ImGui::PlotLines(
-			"##AudioSamples",
+			"##AudioSamplesR",
 			&buf[1],
 			m_numAudioSamples / 2,
 			0,
@@ -407,6 +493,30 @@ void GLAudioVisApp::drawGUI()
 			1.0f,
 			ImVec2(0,80),
 			sizeof(float) * 2 // stride
+		);
+
+		ImGui::SliderFloat("Histogram Smoothing", &m_histogramSmoothing, 0.0f, 1.0f, "%.1f");
+
+		ImGui::PlotHistogram(
+			"##AudioHistogramL",
+			m_leftSampleBuckets.data(),
+			s_numBuckets,
+			0,
+			"Left",
+			0.0f,
+			100.0f,
+			ImVec2(0, 80.0f)
+		);
+
+		ImGui::PlotHistogram(
+			"##AudioHistogramR",
+			m_rightSampleBuckets.data(),
+			s_numBuckets,
+			0,
+			"Right",
+			0.0f,
+			100.0f,
+			ImVec2(0, 80.0f)
 		);
 	}
 

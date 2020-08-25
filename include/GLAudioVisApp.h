@@ -1,15 +1,14 @@
 #pragma once
 
-#include <fmt/core.h>
-
-#include <GL/glew.h> // load glew before SDL_opengl
+#include <thread>
 
 #include <SDL2/SDL.h>
-
-#include <imgui/imgui.h>
+#include <GL/glew.h> // load glew before SDL_opengl
 #include <pulse/simple.h>
+#include <fftw3.h>
 
-#include <thread>
+#include <fmt/core.h>
+#include <imgui/imgui.h>
 
 #include "SDLUtils/Window.h"
 #include "SDLUtils/GLContext.h"
@@ -32,7 +31,16 @@ private:
 		m_numAudioSamples{1024},
 		m_audioSampleBuffer{},
 		m_audioThreadActive{false},
-		m_audioThread{}
+		m_audioThread{},
+		m_dftPlanLeft{nullptr},
+		m_dftPlanRight{nullptr},
+		m_fftInputLeft{},
+		m_fftInputRight{},
+		m_fftOutputLeft{nullptr},
+		m_fftOutputRight{nullptr},
+		m_leftSampleBuckets{},
+		m_rightSampleBuckets{},
+		m_histogramSmoothing{0.0f}
 	{
 		fmt::print("GLAudioVisApp()\n");
 	}
@@ -96,4 +104,15 @@ private:
 	std::vector<char> m_audioSampleBuffer; // use char here, as 1 byte
 	bool m_audioThreadActive;
 	std::thread m_audioThread;
+
+	fftw_plan m_dftPlanLeft, m_dftPlanRight;
+	std::vector<double> m_fftInputLeft, m_fftInputRight;
+	fftw_complex* m_fftOutputLeft;
+	fftw_complex* m_fftOutputRight;
+
+	static constexpr size_t s_numBuckets = 5;
+	std::array<float, s_numBuckets> m_leftSampleBuckets;
+	std::array<float, s_numBuckets> m_rightSampleBuckets;
+
+	float m_histogramSmoothing;
 };

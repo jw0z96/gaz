@@ -32,16 +32,25 @@ find_package(OpenGL REQUIRED)
 # find PulseAudio
 find_package(PulseAudio REQUIRED)
 
+
 find_package(GLEW REQUIRED)
 include_directories(${GLEW_INCLUDE_DIRS})
 message(STATUS "GLEW includes from ${GLEW_INCLUDE_DIRS}")
+
+# include everything under 'libs', which contains libraries supplied by the project
+include_directories(libs)
+
+# add fftw
+#find_package(fftw3 REQUIRED) # this fails because of a bug in fedora?
+
+add_subdirectory(libs/fftw-3.3.8 EXCLUDE_FROM_ALL bench) # bench doesn't link in subdir build???
+
+#include_directories(libs/fftw-3.3.8/api)
 
 # add fmt
 add_subdirectory(libs/fmt)
 include_directories(libs/fmt/include)
 
-# include everything under 'libs', which contains libraries supplied by the project
-include_directories(libs)
 # whatever trevor
 add_library(imgui STATIC
 	libs/imgui/imconfig.h
@@ -61,4 +70,4 @@ add_library(imgui STATIC
 )
 
 # link our executable against external libraries
-target_link_libraries(GLAudioVisApp Threads::Threads imgui pulse pulse-simple fmt ${SDL2_LIBRARIES} ${GLEW_LIBRARIES} ${OPENGL_LIBRARY})
+target_link_libraries(GLAudioVisApp Threads::Threads pulse pulse-simple fftw3 fmt imgui ${SDL2_LIBRARIES} ${GLEW_LIBRARIES} ${OPENGL_LIBRARY})

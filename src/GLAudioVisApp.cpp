@@ -398,7 +398,6 @@ void GLAudioVisApp::processAudio()
 					}
 				}
 			}
-
 		}
 
 		const auto endTime3 = std::chrono::system_clock::now();
@@ -492,83 +491,65 @@ void GLAudioVisApp::drawGUI()
 			toggleRecording();
 		}
 
+		ImGui::SetNextItemWidth(currentWidth);
+		ImGui::SliderFloat("##Smoothing", &m_histogramSmoothing, 0.0f, 1.0f, "Histogram Smoothing: %.1f");
+
 		// Cast the start of the buffer to a float array, since that's what ImGui needs to plot lines, and sizeof(float)
 		// matches m_bytesPerSample
 		assert(sizeof(float) == pa_sample_size_of_format(m_audioSamplingSettings.sampleFormat));
 		const float* buf = reinterpret_cast<float*>(m_audioSampleBuffer.data());
 
-		// Left and Right sample data is interleaved - Left starts at [0], Right starts at [1], 2 element stride
-		ImGui::SetNextItemWidth(currentWidth * 0.5f);
-		ImGui::PlotLines(
-			"##AudioSamplesL",
-			&buf[0],
-			m_audioSamplingSettings.numSamples / 2,
-			0,
-			"Raw PCM (L)",
-			-1.0f,
-			1.0f,
-			ImVec2(0,80),
-			sizeof(float) * 2 // stride
-		);
-		ImGui::SameLine();
-
-		ImGui::SetNextItemWidth(currentWidth * 0.5f);
-		ImGui::PlotLines(
-			"##AudioSamplesR",
-			&buf[1],
-			m_audioSamplingSettings.numSamples / 2,
-			0,
-			"Raw PCM (R)",
-			-1.0f,
-			1.0f,
-			ImVec2(0,80),
-			sizeof(float) * 2 // stride
-		);
-
-		for (const auto& fftData : m_processedAudioData)
+		ImGui::Columns(m_audioSamplingSettings.numChannels);
+		for (unsigned int i = 0; i < m_audioSamplingSettings.numChannels; ++i)
 		{
-			ImGui::SetNextItemWidth(currentWidth * 0.5f);
+			const auto& columnWidth = ImGui::GetColumnWidth();
+			const auto& fftData = m_processedAudioData[i];
+			const char* channelNameShort = fftData.channelID == AudioChannel::Left ? "L" : "R";
+			const char* channelNameLong = fftData.channelID == AudioChannel::Left ? "Left" : "Right";
+
+			ImGui::Text("%s (%s)", channelNameShort, channelNameLong);
+
+			// Raw PCM
 			ImGui::PlotLines(
-				fftData.channelID == AudioChannel::Left ?
-					"##fftOutputRawL" :
-					"##fftOutputRawR",
+				fmt::format("##AudioSamples{}", channelNameShort).c_str(),
+				&buf[i],
+				m_audioSamplingSettings.numSamples / 2,
+				0,
+				fmt::format("Raw PCM ({})", channelNameShort).c_str(),
+				-1.0f,
+				1.0f,
+				ImVec2(columnWidth, 80),
+				sizeof(float) * 2 // stride
+			);
+
+			// Raw DFT
+			ImGui::PlotLines(
+				fmt::format("##fftOutputRaw{}", channelNameShort).c_str(),
 				fftData.dftOutputRaw.data(),
 				fftData.dftOutputRaw.size(),
 				0,
-				fftData.channelID == AudioChannel::Left ?
-					"Raw DFT (L)" :
-					"Raw DFT (R)",
+				fmt::format("Raw DFT ({})", channelNameShort).c_str(),
 				0.0f,
 				100.0f,
-				ImVec2(0, 80)
+				ImVec2(columnWidth, 80)
 			);
-			ImGui::SameLine();
-		}
 
-		ImGui::NewLine(); ImGui::Separator();
-
-		ImGui::SetNextItemWidth(currentWidth);
-		ImGui::SliderFloat("##Smoothing", &m_histogramSmoothing, 0.0f, 1.0f, "Histogram Smoothing: %.1f");
-
-		for (const auto& fftData : m_processedAudioData)
-		{
-			ImGui::SetNextItemWidth(currentWidth * 0.5f);
+			// Histogram
 			ImGui::PlotHistogram(
-				fftData.channelID == AudioChannel::Left ?
-					"##AudioHistogramL" :
-					"##AudioHistogramR",
+				fmt::format("##AudioHistogram{}", channelNameShort).c_str(),
 				fftData.spectrumBuckets.data(),
 				s_numBuckets,
 				0,
-				fftData.channelID == AudioChannel::Left ? "L" : "R",
+				fmt::format("Histogram ({})", channelNameShort).c_str(),
 				0.0f,
 				100.0f,
-				ImVec2(0, 80.0f)
+				ImVec2(columnWidth, 80.0f)
 			);
-			ImGui::SameLine();
+
+			ImGui::NextColumn();
 		}
 
-		ImGui::NewLine();
+		ImGui::Columns(1); // reset the column count
 	}
 
 	ImGui::End();

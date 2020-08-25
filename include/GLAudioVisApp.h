@@ -38,6 +38,8 @@ private:
 		m_fftInputRight{},
 		m_fftOutputLeft{nullptr},
 		m_fftOutputRight{nullptr},
+		m_fftOutputLeftRaw{},
+		m_fftOutputRightRaw{},
 		m_leftSampleBuckets{},
 		m_rightSampleBuckets{},
 		m_histogramSmoothing{0.0f}
@@ -109,6 +111,7 @@ private:
 	std::vector<double> m_fftInputLeft, m_fftInputRight;
 	fftw_complex* m_fftOutputLeft;
 	fftw_complex* m_fftOutputRight;
+	std::vector<float> m_fftOutputLeftRaw, m_fftOutputRightRaw;
 
 	static constexpr size_t s_numBuckets = 5;
 	std::array<float, s_numBuckets> m_leftSampleBuckets;

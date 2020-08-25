@@ -329,8 +329,6 @@ void GLAudioVisApp::processEvent(const SDL_Event&)
 
 void GLAudioVisApp::processAudio()
 {
-	int error;
-
 	const auto startTime1 = std::chrono::system_clock::now();
 
 	if (m_audioThreadActive)
@@ -338,6 +336,7 @@ void GLAudioVisApp::processAudio()
 		const auto startTime2 = std::chrono::system_clock::now();
 
 		// This will block for a fixed amount of time
+		int error;
 		if (pa_simple_read(m_audioSource, m_audioSampleBuffer.data(), m_audioSampleBuffer.size(), &error) < 0)
 		{
 			fmt::print("GLAudioVisApp::processAudio: Failed to read: {}\n", pa_strerror(error));
@@ -443,6 +442,8 @@ void GLAudioVisApp::drawGUI()
 		return;
 	}
 
+	const auto& currentWidth = ImGui::GetWindowWidth();
+
 	const float frameTime = GLUtils::getElapsed(frameTimer);
 	ImGui::Text("Frame time: %.1f ms (%.1f fps)", frameTime, 1000.0f / frameTime);
 
@@ -466,6 +467,8 @@ void GLAudioVisApp::drawGUI()
 		average *= numFrameSamplesReciprocal;
 
 		const auto overlay = fmt::format("Average {0:.1f} ms ({0:.1f} fps)", average, 1000.0f / average);
+
+		ImGui::SetNextItemWidth(currentWidth);
 		ImGui::PlotLines("##FrameTimes", frameTimes, numFrameSamples, frameOffset, overlay.c_str(), 0.0f, 100.0f, ImVec2(0,80));
 
 		frameOffset = (frameOffset + 1) % numFrameSamples;
@@ -495,6 +498,7 @@ void GLAudioVisApp::drawGUI()
 		const float* buf = reinterpret_cast<float*>(m_audioSampleBuffer.data());
 
 		// Left and Right sample data is interleaved - Left starts at [0], Right starts at [1], 2 element stride
+		ImGui::SetNextItemWidth(currentWidth * 0.5f);
 		ImGui::PlotLines(
 			"##AudioSamplesL",
 			&buf[0],
@@ -506,7 +510,9 @@ void GLAudioVisApp::drawGUI()
 			ImVec2(0,80),
 			sizeof(float) * 2 // stride
 		);
+		ImGui::SameLine();
 
+		ImGui::SetNextItemWidth(currentWidth * 0.5f);
 		ImGui::PlotLines(
 			"##AudioSamplesR",
 			&buf[1],
@@ -521,6 +527,7 @@ void GLAudioVisApp::drawGUI()
 
 		for (const auto& fftData : m_processedAudioData)
 		{
+			ImGui::SetNextItemWidth(currentWidth * 0.5f);
 			ImGui::PlotLines(
 				fftData.channelID == AudioChannel::Left ?
 					"##fftOutputRawL" :
@@ -535,12 +542,17 @@ void GLAudioVisApp::drawGUI()
 				100.0f,
 				ImVec2(0, 80)
 			);
+			ImGui::SameLine();
 		}
 
+		ImGui::NewLine(); ImGui::Separator();
+
+		ImGui::SetNextItemWidth(currentWidth);
 		ImGui::SliderFloat("##Smoothing", &m_histogramSmoothing, 0.0f, 1.0f, "Histogram Smoothing: %.1f");
 
 		for (const auto& fftData : m_processedAudioData)
 		{
+			ImGui::SetNextItemWidth(currentWidth * 0.5f);
 			ImGui::PlotHistogram(
 				fftData.channelID == AudioChannel::Left ?
 					"##AudioHistogramL" :
@@ -548,12 +560,15 @@ void GLAudioVisApp::drawGUI()
 				fftData.spectrumBuckets.data(),
 				s_numBuckets,
 				0,
-				"",
+				fftData.channelID == AudioChannel::Left ? "L" : "R",
 				0.0f,
 				100.0f,
 				ImVec2(0, 80.0f)
 			);
+			ImGui::SameLine();
 		}
+
+		ImGui::NewLine();
 	}
 
 	ImGui::End();

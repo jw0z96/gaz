@@ -37,7 +37,13 @@ private:
 			1024, // numSamples
 			PA_SAMPLE_FLOAT32LE, // sample format
 		},
-		m_processedAudioData{},
+		m_numSpectrumBuckets{20},
+		// m_spectrumPowerCurve{2.0f},
+		// m_spectrumBuckets
+		// {
+		// 	calculateBuckets(m_numSpectrumBuckets, m_spectrumPowerCurve)
+		// },
+		m_audioFFTData{},
 		m_histogramSmoothing{0.0f}
 	{
 		fmt::print("GLAudioVisApp()\n");
@@ -69,6 +75,8 @@ private:
 	bool initImGuiContext();
 
 	bool initPulseAudioSource();
+
+	// static std::vector<float> calculateBuckets(int numBuckets, float powerCurve);
 
 	// Main program loop
 	void run();
@@ -115,9 +123,11 @@ private:
 		Right = 1
 	};
 
-	static constexpr size_t s_numBuckets = 5;
+	int m_numSpectrumBuckets;
+	// float m_spectrumPowerCurve;
+	// std::vector<float> m_spectrumBuckets;
 
-	struct AudioProcessData
+	struct AudioFFTData
 	{
 		AudioChannel channelID;
 		// internal data for fftW
@@ -126,10 +136,10 @@ private:
 		fftw_plan fftwPlan;
 		// Processed output data
 		std::vector<float> dftOutputRaw;
-		std::array<float, s_numBuckets> spectrumBuckets;
+		std::vector<float> spectrumBuckets;
 	};
 
-	std::vector<AudioProcessData> m_processedAudioData;
+	std::vector<AudioFFTData> m_audioFFTData;
 
 	float m_histogramSmoothing;
 };

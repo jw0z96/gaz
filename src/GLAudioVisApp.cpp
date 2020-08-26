@@ -1,6 +1,7 @@
 #include "GLAudioVisApp.h"
 
 #include <fmt/core.h>
+#include <fmt/ranges.h>
 
 #include <SDL2/SDL_opengl.h>
 
@@ -17,13 +18,17 @@ namespace
 	constexpr unsigned int DEFAULT_SCREEN_WIDTH = 1024;
 	constexpr unsigned int DEFAULT_SCREEN_HEIGHT = 768;
 
-	constexpr float freqBuckets[] = { 20.0f, 140.0f, 400.0f, 2600.0f, 5200.0f, std::numeric_limits<float>::max() };
 
 	float runLoopElapsed = 0.0f;
 
 	float audioProcessingTime1 = 0.0f;
 	float audioProcessingTime2 = 0.0f;
 	float audioProcessingTime3 = 0.0f;
+
+	constexpr float minBucketFreqLog = log10(20.0f);
+	constexpr float maxBucketFreqLog = log10(20000.0f);
+
+	// constexpr float freqBuckets[] = { 20.0f, 140.0f, 400.0f, 2600.0f, 5200.0f, std::numeric_limits<float>::max() };
 };
 
 int GLAudioVisApp::execute(int argc, char* argv[])
@@ -89,7 +94,7 @@ GLAudioVisApp::~GLAudioVisApp()
 		pa_simple_free(m_audioSource);
 	}
 
-	for (const auto &processedAudioData : m_processedAudioData)
+	for (const auto &processedAudioData : m_audioFFTData)
 	{
 		fftw_free(processedAudioData.fftwOutput);
 		fftw_destroy_plan(processedAudioData.fftwPlan);
@@ -256,10 +261,10 @@ bool GLAudioVisApp::initPulseAudioSource()
 
 	// Since we need to keep the references passed to fftwPlan intact, default construct 'numchannels' elements,
 	// then fill them
-	m_processedAudioData.resize(m_audioSamplingSettings.numChannels);
+	m_audioFFTData.resize(m_audioSamplingSettings.numChannels);
 	for (size_t i = 0; i < m_audioSamplingSettings.numChannels; ++i)
 	{
-		AudioProcessData& data = m_processedAudioData[i];
+		AudioFFTData& data = m_audioFFTData[i];
 		data.channelID = static_cast<AudioChannel>(i);
 		// Prepare data for fftw
 		data.fftwInput.resize(m_audioSamplingSettings.numSamples);
@@ -269,12 +274,40 @@ bool GLAudioVisApp::initPulseAudioSource()
 		);
 		// Allocate vectors that are used by ImGui
 		data.dftOutputRaw.resize(m_audioSamplingSettings.numSamples / 2);
-		data.spectrumBuckets.fill(0.0f);
+
+		data.spectrumBuckets.resize(m_numSpectrumBuckets);
 	}
 
 	return true;
 }
+/*
+// returns a vector of size numBuckets + 1, fist and last will be min/max above
+std::vector<float> GLAudioVisApp::calculateBuckets(int numBuckets, float powerCurve)
+{
+	// set this according to human hearing ranges, or something
+	constexpr float minBucketFreq = 20.0f;
+	constexpr float maxBucketFreq = 20000.0f;
 
+	std::vector<float> buckets(numBuckets + 1);
+	buckets.front() = minBucketFreq;
+	buckets.back() = maxBucketFreq;
+
+	for (int i = 1; i < numBuckets; ++i)
+	{
+		float t = static_cast<float>(i) / static_cast<float>(numBuckets);
+		// t = pow(t, powerCurve);
+		buckets[i] = minBucketFreq + (maxBucketFreq - minBucketFreq) * t;
+	}
+	fmt::print("buckets: {}\n", buckets);
+
+	// std::vector<float> logBuckets = buckets;
+	std::for_each(buckets.begin(), buckets.end(), [](float& x){ x = log10(x); });
+	fmt::print("log buckets: {}\n", buckets);
+
+
+	return buckets;
+}
+*/
 void GLAudioVisApp::run()
 {
 	// main loop
@@ -346,7 +379,7 @@ void GLAudioVisApp::processAudio()
 		const auto endTime2 = std::chrono::system_clock::now();
 
 		// If we have more than 1 channel, unpack into the different data channels
-		const size_t numChannels = m_processedAudioData.size();
+		const size_t numChannels = m_audioFFTData.size();
 		if (numChannels > 1)
 		{
 			// reinterpret as float array as it should match the sample size
@@ -356,7 +389,7 @@ void GLAudioVisApp::processAudio()
 			{
 				for (size_t j = 0; j < numChannels; ++j)
 				{
-					m_processedAudioData[j].fftwInput[i] = buf[numChannels * i + j];
+					m_audioFFTData[j].fftwInput[i] = buf[numChannels * i + j];
 				}
 			}
 		}
@@ -365,7 +398,7 @@ void GLAudioVisApp::processAudio()
 		static const float reciprocal = static_cast<float>(m_audioSamplingSettings.sampleRate) / static_cast<float>(m_audioSamplingSettings.numSamples);
 
 		// put these on seperate threads?
-		for (auto& fftData : m_processedAudioData)
+		for (auto& fftData : m_audioFFTData)
 		{
 			// run the DFT
 			fftw_execute(fftData.fftwPlan);
@@ -380,23 +413,30 @@ void GLAudioVisApp::processAudio()
 			for (unsigned int i = 0; i < (m_audioSamplingSettings.numSamples / 2); ++i)
 			{
 				const fftw_complex& sample = fftData.fftwOutput[i];
-				const float amplitude = sqrt(sample[0] * sample[0] + sample[1] * sample[1]);
+				const float amplitude = 10.0f * log10(sample[0] * sample[0] + sample[1] * sample[1]);
+				// const float amplitude = sqrt(sample[0] * sample[0] + sample[1] * sample[1]);
 				// const float amplitude = sample[0] + sample[1]; // no need to sqrt
 				fftData.dftOutputRaw[i] = amplitude;
 
-				// Frequency is approximate, based on the sample size
-				const float freq = static_cast<float>(i) * reciprocal;
-				for (size_t j = 0; j < s_numBuckets; ++j)
-				{
-					// freqBuckets is sized s_numBuckets + 1, so this is safe
-					if (freq > freqBuckets[j] && freq < freqBuckets[j + 1])
-					{
-						fftData.spectrumBuckets[j] = amplitude > fftData.spectrumBuckets[j] ?
-							amplitude :
-							fftData.spectrumBuckets[j];
-						break;
-					}
-				}
+				// Frequency is approximate, based on the sample size, so it never fills the buckets properly :/
+				const float freq = log10(static_cast<float>(i) * reciprocal);
+				float t = (freq - minBucketFreqLog) / (maxBucketFreqLog - minBucketFreqLog);
+				int idx = std::max(std::min(int(t * m_numSpectrumBuckets), m_numSpectrumBuckets), 0);
+				fftData.spectrumBuckets[idx] = amplitude > fftData.spectrumBuckets[idx] ?
+					amplitude :
+					fftData.spectrumBuckets[idx];
+
+				// for (int j = 0; j < m_numSpectrumBuckets; ++j)
+				// {
+				// 	// freqBuckets is sized m_numSpectrumBuckets + 1, so this is safe
+				// 	if (freq > m_spectrumBuckets[j] && freq < m_spectrumBuckets[j + 1])
+				// 	{
+				// 		fftData.spectrumBuckets[j] = amplitude > fftData.spectrumBuckets[j] ?
+				// 			amplitude :
+				// 			fftData.spectrumBuckets[j];
+				// 		break;
+				// 	}
+				// }
 			}
 		}
 
@@ -408,7 +448,6 @@ void GLAudioVisApp::processAudio()
 
 	const auto endTime1 = std::chrono::system_clock::now();
 	audioProcessingTime1 = std::chrono::duration_cast<std::chrono::milliseconds>(endTime1 - startTime1).count();
-
 }
 
 void GLAudioVisApp::toggleRecording()
@@ -491,6 +530,23 @@ void GLAudioVisApp::drawGUI()
 			toggleRecording();
 		}
 
+		bool spectrumChanged = false;
+		spectrumChanged = ImGui::SliderInt("##NumBuckets", &m_numSpectrumBuckets, 1, 100, "Num Spectrum Buckets: %i");
+		if (spectrumChanged)
+		{
+			for (auto& fftData : m_audioFFTData)
+			{
+				fftData.spectrumBuckets.clear();
+				fftData.spectrumBuckets.resize(m_numSpectrumBuckets);
+			}
+		}
+		// spectrumChanged = spectrumChanged || ImGui::SliderFloat("##PowerCurve", &m_spectrumPowerCurve, 0.0f, 10.0f, "Spectrum Power Curve: %.2f");
+		// if (spectrumChanged)
+		// {
+		// 	m_spectrumBuckets = calculateBuckets(m_numSpectrumBuckets, m_spectrumPowerCurve);
+		// 	// fmt::print("buckets: {}\n", m_spectrumBuckets);
+		// }
+
 		ImGui::SetNextItemWidth(currentWidth);
 		ImGui::SliderFloat("##Smoothing", &m_histogramSmoothing, 0.0f, 1.0f, "Histogram Smoothing: %.1f");
 
@@ -503,7 +559,7 @@ void GLAudioVisApp::drawGUI()
 		for (unsigned int i = 0; i < m_audioSamplingSettings.numChannels; ++i)
 		{
 			const auto& columnWidth = ImGui::GetColumnWidth();
-			const auto& fftData = m_processedAudioData[i];
+			const auto& fftData = m_audioFFTData[i];
 			const char* channelNameShort = fftData.channelID == AudioChannel::Left ? "L" : "R";
 			const char* channelNameLong = fftData.channelID == AudioChannel::Left ? "Left" : "Right";
 
@@ -530,7 +586,7 @@ void GLAudioVisApp::drawGUI()
 				0,
 				fmt::format("Raw DFT ({})", channelNameShort).c_str(),
 				0.0f,
-				100.0f,
+				48.0f,
 				ImVec2(columnWidth, 80)
 			);
 
@@ -538,11 +594,11 @@ void GLAudioVisApp::drawGUI()
 			ImGui::PlotHistogram(
 				fmt::format("##AudioHistogram{}", channelNameShort).c_str(),
 				fftData.spectrumBuckets.data(),
-				s_numBuckets,
+				m_numSpectrumBuckets,
 				0,
 				fmt::format("Histogram ({})", channelNameShort).c_str(),
 				0.0f,
-				100.0f,
+				48.0f,
 				ImVec2(columnWidth, 80.0f)
 			);
 

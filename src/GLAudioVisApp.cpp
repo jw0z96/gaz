@@ -15,8 +15,8 @@
 #include "GLUtils/Timer.h"
 namespace
 {
-	constexpr unsigned int DEFAULT_SCREEN_WIDTH = 1024;
-	constexpr unsigned int DEFAULT_SCREEN_HEIGHT = 768;
+	constexpr unsigned int DEFAULT_SCREEN_WIDTH = 800; // 1024;
+	constexpr unsigned int DEFAULT_SCREEN_HEIGHT = 600; // 768;
 
 
 	float runLoopElapsed = 0.0f;
@@ -136,6 +136,13 @@ bool GLAudioVisApp::init()
 		return false;
 	}
 
+	if (!initDrawingPipeline())
+	{
+		fmt::print(
+			"GLAudioVisApp::init: Failed to configure drawing pipeline\n"
+		);
+		return false;
+	}
 
 	return true;
 }
@@ -280,6 +287,7 @@ bool GLAudioVisApp::initPulseAudioSource()
 
 	return true;
 }
+
 /*
 // returns a vector of size numBuckets + 1, fist and last will be min/max above
 std::vector<float> GLAudioVisApp::calculateBuckets(int numBuckets, float powerCurve)
@@ -308,6 +316,33 @@ std::vector<float> GLAudioVisApp::calculateBuckets(int numBuckets, float powerCu
 	return buckets;
 }
 */
+
+bool GLAudioVisApp::initDrawingPipeline()
+{
+	m_outputShader = std::make_unique<const GLUtils::ShaderProgram>(
+		std::list<GLUtils::ShaderProgram::ShaderComponent>
+		{
+			{ GL_VERTEX_SHADER, "shaders/screenspace.vert" },
+			{ GL_FRAGMENT_SHADER, "shaders/output.frag" }
+		}
+	);
+
+	if (!m_outputShader->isValid())
+	{
+		fmt::print("GLAudioVisApp::initDrawingPipeline: output shader invalid!\n");
+		return false;
+	}
+
+	m_outputShader->use();
+
+	m_emptyVAO = std::make_unique<const GLUtils::VAO>();
+	m_emptyVAO->bind();
+
+	glDisable(GL_DEPTH_TEST);
+
+	return true;
+}
+
 void GLAudioVisApp::run()
 {
 	// main loop
@@ -469,6 +504,25 @@ void GLAudioVisApp::drawFrame()
 	GLUtils::scopedTimer(frameTimer);
 
 	glClear(GL_COLOR_BUFFER_BIT);
+
+	m_outputShader->use();
+
+	{
+		GLUtils::scopedTimer(uniformTimer);
+
+		constexpr size_t dftSize = 512;
+
+		static const auto dftLeftLoc = m_outputShader->getUniformLocation("u_dftLeft[0]");
+		glUniform1fv(dftLeftLoc, dftSize, m_audioFFTData[0].dftOutputRaw.data());
+		// glUniform1fv(dftLeftLoc, dftSize, m_audioFFTData[0].spectrumBuckets.data());
+
+		static const auto dftRightLoc = m_outputShader->getUniformLocation("u_dftRight[0]");
+		glUniform1fv(dftRightLoc, dftSize, m_audioFFTData[1].dftOutputRaw.data());
+		// glUniform1fv(dftRightLoc, dftSize, m_audioFFTData[1].spectrumBuckets.data());
+	}
+
+	// The vertex shader will create a screen space quad, so no need to bind a different VAO & VBO
+	glDrawArrays(GL_TRIANGLES, 0, 6);
 }
 
 void GLAudioVisApp::drawGUI()
@@ -484,6 +538,7 @@ void GLAudioVisApp::drawGUI()
 
 	const float frameTime = GLUtils::getElapsed(frameTimer);
 	ImGui::Text("Frame time: %.1f ms (%.1f fps)", frameTime, 1000.0f / frameTime);
+	ImGui::Text("\tUniform update time: %.1fms", GLUtils::getElapsed(uniformTimer));
 
 	// create a plot of the frame times
 	{

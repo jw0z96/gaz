@@ -13,6 +13,9 @@
 #include "SDLUtils/Window.h"
 #include "SDLUtils/GLContext.h"
 
+#include "GLUtils/ShaderProgram.h"
+#include "GLUtils/VAO.h"
+
 class GLAudioVisApp
 {
 public:
@@ -44,7 +47,9 @@ private:
 		// 	calculateBuckets(m_numSpectrumBuckets, m_spectrumPowerCurve)
 		// },
 		m_audioFFTData{},
-		m_histogramSmoothing{0.0f}
+		m_histogramSmoothing{0.0f},
+		m_outputShader{nullptr},
+		m_emptyVAO{nullptr}
 	{
 		fmt::print("GLAudioVisApp()\n");
 	}
@@ -75,6 +80,8 @@ private:
 	bool initImGuiContext();
 
 	bool initPulseAudioSource();
+
+	bool initDrawingPipeline(); // shaders & gl state
 
 	// static std::vector<float> calculateBuckets(int numBuckets, float powerCurve);
 
@@ -142,4 +149,8 @@ private:
 	std::vector<AudioFFTData> m_audioFFTData;
 
 	float m_histogramSmoothing;
+
+	std::unique_ptr<const GLUtils::ShaderProgram> m_outputShader;
+
+	std::unique_ptr<const GLUtils::VAO> m_emptyVAO;
 };

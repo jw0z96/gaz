@@ -13,6 +13,7 @@
 #include <chrono>
 
 #include "GLUtils/Timer.h"
+
 namespace
 {
 	constexpr unsigned int DEFAULT_SCREEN_WIDTH = 800; // 1024;
@@ -88,7 +89,7 @@ GLAudioVisApp::~GLAudioVisApp()
 		if (m_audioThreadActive)
 		{
 			m_audioThreadActive = false;
-			// m_audioThread.join();
+			m_audioThread.join();
 		}
 
 		pa_simple_free(m_audioSource);
@@ -182,7 +183,7 @@ bool GLAudioVisApp::initGLContext()
 	}
 
 	// disable vsync in the OpenGL context, TODO: set this in some kind of config?
-	SDL_GL_SetSwapInterval(0);
+	SDL_GL_SetSwapInterval(1);
 
 	// initialize GLEW once we have a valid GL context - TODO: GLAD?
 	glewExperimental = GL_TRUE;
@@ -367,7 +368,7 @@ void GLAudioVisApp::run()
 		}
 
 		// Capture audio and perform FFT
-		processAudio();
+		// processAudio();
 
 		// our opengl render
 		drawFrame();
@@ -397,9 +398,9 @@ void GLAudioVisApp::processEvent(const SDL_Event&)
 
 void GLAudioVisApp::processAudio()
 {
-	const auto startTime1 = std::chrono::system_clock::now();
+	// const auto startTime1 = std::chrono::system_clock::now();
 
-	if (m_audioThreadActive)
+	while (m_audioThreadActive)
 	{
 		const auto startTime2 = std::chrono::system_clock::now();
 
@@ -476,27 +477,27 @@ void GLAudioVisApp::processAudio()
 		}
 
 		const auto endTime3 = std::chrono::system_clock::now();
-
 		audioProcessingTime2 = std::chrono::duration_cast<std::chrono::milliseconds>(endTime2 - startTime2).count();
 		audioProcessingTime3 = std::chrono::duration_cast<std::chrono::milliseconds>(endTime3 - endTime2).count();
+		audioProcessingTime1 = audioProcessingTime2 + audioProcessingTime3;
 	}
 
-	const auto endTime1 = std::chrono::system_clock::now();
-	audioProcessingTime1 = std::chrono::duration_cast<std::chrono::milliseconds>(endTime1 - startTime1).count();
+	// const auto endTime1 = std::chrono::system_clock::now();
+	// audioProcessingTime1 = std::chrono::duration_cast<std::chrono::milliseconds>(endTime1 - startTime1).count();
 }
 
 void GLAudioVisApp::toggleRecording()
 {
 	m_audioThreadActive = !m_audioThreadActive;
 
-	// if (m_audioThreadActive)
-	// {
-	// 	m_audioThread = std::thread(&GLAudioVisApp::processAudio, this);
-	// }
-	// else
-	// {
-	// 	m_audioThread.join();
-	// }
+	if (m_audioThreadActive)
+	{
+		m_audioThread = std::thread(&GLAudioVisApp::processAudio, this);
+	}
+	else
+	{
+		m_audioThread.join();
+	}
 }
 
 void GLAudioVisApp::drawFrame()
@@ -536,6 +537,10 @@ void GLAudioVisApp::drawGUI()
 
 	const auto& currentWidth = ImGui::GetWindowWidth();
 
+	ImGui::Text("Run Loop Time: %.1fms", runLoopElapsed);
+
+	ImGui::Separator();
+
 	const float frameTime = GLUtils::getElapsed(frameTimer);
 	ImGui::Text("Frame time: %.1f ms (%.1f fps)", frameTime, 1000.0f / frameTime);
 	ImGui::Text("\tUniform update time: %.1fms", GLUtils::getElapsed(uniformTimer));
@@ -572,12 +577,11 @@ void GLAudioVisApp::drawGUI()
 	ImGui::Text("Audio Sample Size: %lu", pa_sample_size_of_format(m_audioSamplingSettings.sampleFormat));
 	ImGui::Text("Audio Samples: %u", m_audioSamplingSettings.numSamples);
 
-	ImGui::Separator();
+	ImGui::NewLine();
 
-	ImGui::Text("Run Loop Time: %.1fms", runLoopElapsed);
-	ImGui::Text("\tAudio Processing Time Total: %.1fms", audioProcessingTime1);
-	ImGui::Text("\t\tTime 1: %fms", audioProcessingTime2);
-	ImGui::Text("\t\tTime 2: %fms", audioProcessingTime3);
+	ImGui::Text("Audio Processing Time Total: %.1fms", audioProcessingTime1);
+	ImGui::Text("\tTime 1: %fms", audioProcessingTime2);
+	ImGui::Text("\tTime 2: %fms", audioProcessingTime3);
 
 	{
 		if (ImGui::Button(!m_audioThreadActive ? "Start Recording" : "Stop Recording"))

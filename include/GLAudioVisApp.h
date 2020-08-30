@@ -114,7 +114,7 @@ private:
 
 	std::vector<char> m_audioSampleBuffer; // use char here, as 1 byte
 	bool m_audioThreadActive;
-	// std::thread m_audioThread;
+	std::thread m_audioThread;
 
 	struct AudioSamplingSettings
 	{

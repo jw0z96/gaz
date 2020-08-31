@@ -39,7 +39,7 @@ void main()
 	// 	fragColour = vec4(0.0f, 0.0f, 0.0f, 1.0f);
 	// }
 
-	float leftDftVal = u_dftLeft[int(uv.x * DFT_SIZE)] / 48.0f;
+	float leftDftVal = u_dftLeft[int((/* 1.0f -  */uv.y) * DFT_SIZE)] / 48.0f;
 	float rightDftVal = u_dftRight[int(uv.y * DFT_SIZE)] / 48.0f;
 
 	fragColour = vec4(leftDftVal, rightDftVal, 0.0f, 1.0f);

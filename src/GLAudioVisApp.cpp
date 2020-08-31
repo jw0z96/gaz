@@ -520,6 +520,7 @@ void GLAudioVisApp::drawFrame()
 		static const auto dftRightLoc = m_outputShader->getUniformLocation("u_dftRight[0]");
 		glUniform1fv(dftRightLoc, dftSize, m_audioFFTData[1].dftOutputRaw.data());
 		// glUniform1fv(dftRightLoc, dftSize, m_audioFFTData[1].spectrumBuckets.data());
+
 	}
 
 	// The vertex shader will create a screen space quad, so no need to bind a different VAO & VBO

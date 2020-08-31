@@ -8,8 +8,6 @@
 #include <imgui/imgui_impl_sdl.h>
 #include <imgui/imgui_impl_opengl3.h>
 
-#include <pulse/error.h>
-
 #include <chrono>
 
 #include "GLUtils/Timer.h"
@@ -19,17 +17,7 @@ namespace
 	constexpr unsigned int DEFAULT_SCREEN_WIDTH = 800; // 1024;
 	constexpr unsigned int DEFAULT_SCREEN_HEIGHT = 600; // 768;
 
-
 	float runLoopElapsed = 0.0f;
-
-	float audioProcessingTime1 = 0.0f;
-	float audioProcessingTime2 = 0.0f;
-	float audioProcessingTime3 = 0.0f;
-
-	constexpr float minBucketFreqLog = log10(20.0f);
-	constexpr float maxBucketFreqLog = log10(20000.0f);
-
-	// constexpr float freqBuckets[] = { 20.0f, 140.0f, 400.0f, 2600.0f, 5200.0f, std::numeric_limits<float>::max() };
 };
 
 using namespace gaz;
@@ -80,27 +68,11 @@ GLAudioVisApp::~GLAudioVisApp()
 
 	GLUtils::clearTimers();
 
-	ImGui_ImplOpenGL3_Shutdown();
-	ImGui_ImplSDL2_Shutdown();
-	ImGui::DestroyContext(m_imGuiContext);
-
-	if (m_audioSource != nullptr)
+	if (m_imGuiContext != nullptr)
 	{
-		// make sure the recording thread is closed
-		// TODO: this is messy, maybe use async & future?
-		if (m_audioThreadActive)
-		{
-			m_audioThreadActive = false;
-			m_audioThread.join();
-		}
-
-		pa_simple_free(m_audioSource);
-	}
-
-	for (const auto &processedAudioData : m_audioFFTData)
-	{
-		fftw_free(processedAudioData.fftwOutput);
-		fftw_destroy_plan(processedAudioData.fftwPlan);
+		ImGui_ImplOpenGL3_Shutdown();
+		ImGui_ImplSDL2_Shutdown();
+		ImGui::DestroyContext(m_imGuiContext);
 	}
 }
 
@@ -131,18 +103,18 @@ bool GLAudioVisApp::init()
 		return false;
 	}
 
-	if (!initPulseAudioSource())
-	{
-		fmt::print(
-			"GLAudioVisApp::init: Failed to create PulseAudio source\n"
-		);
-		return false;
-	}
-
 	if (!initDrawingPipeline())
 	{
 		fmt::print(
 			"GLAudioVisApp::init: Failed to configure drawing pipeline\n"
+		);
+		return false;
+	}
+
+	if (!m_audioEngine.init())
+	{
+		fmt::print(
+			"GLAudioVisApp::init: Failed to init Audio Engine\n"
 		);
 		return false;
 	}
@@ -220,106 +192,6 @@ bool GLAudioVisApp::initImGuiContext()
 	return m_imGuiContext != nullptr;
 }
 
-bool GLAudioVisApp::initPulseAudioSource()
-{
-	// Specify the sample format, should be possible to determine this from `pacmd list-sources`?
-	pa_sample_spec sampleFormat;
-
-	sampleFormat.format = m_audioSamplingSettings.sampleFormat;
-	sampleFormat.channels = m_audioSamplingSettings.numChannels;
-	sampleFormat.rate = m_audioSamplingSettings.sampleRate;
-
-	// pa_buffer_attr ba;
-	// ba.maxlength = 1024; // max length of the buffer
-	// ba.tlength = (uint32_t)-1; // target buffer length (bytes) ?  playback only?
-	// ba.minreq = 1024; // minimum request ?
-	// ba.fragsize = 1024; // fragment size (bytes) recording only?
-
-	// TODO: command line option
-	// const std::string source = "alsa_input.pci-0000_00_1b.0.analog-stereo";
-	const std::string source = "alsa_output.pci-0000_00_1b.0.analog-stereo.monitor";
-
-	// connect to the PulseAudio server
-	int error;
-	m_audioSource = pa_simple_new(
-		nullptr,			// Use the default server.
-		"GLAudioVis",		// Our application's name.
-		PA_STREAM_RECORD,	// Connection Mode
-		source.c_str(),		// Use the default device.
-		"Record",			// Description of our stream.
-		&sampleFormat,		// Our sample format.
-		nullptr,			// Use default channel map
-		nullptr,			// Use default buffering attributes.
-		&error				// Ignore error code.
-	);
-
-	if (m_audioSource == nullptr || error < 0)
-	{
-		fmt::print(
-			"GLAudioVisApp::initPulseAudioSource: Failed to connect to audio source '{}', error: {}\n",
-			source.c_str(),
-			pa_strerror(error)
-		);
-		return false;
-	}
-
-	// resize the buffer to accomodate for the read size (bytes)
-	// m_audioSamplingSettings.numSamples = sampleFormat.rate; // 1 sec of audio samples
-	const size_t bufferSize = pa_sample_size_of_format(m_audioSamplingSettings.sampleFormat) * m_audioSamplingSettings.numSamples * m_audioSamplingSettings.numChannels;
-	fmt::print("buffer size: {}\n", bufferSize);
-	m_audioSampleBuffer.resize(bufferSize);
-
-	// Since we need to keep the references passed to fftwPlan intact, default construct 'numchannels' elements,
-	// then fill them
-	m_audioFFTData.resize(m_audioSamplingSettings.numChannels);
-	for (size_t i = 0; i < m_audioSamplingSettings.numChannels; ++i)
-	{
-		AudioFFTData& data = m_audioFFTData[i];
-		data.channelID = static_cast<AudioChannel>(i);
-		// Prepare data for fftw
-		data.fftwInput.resize(m_audioSamplingSettings.numSamples);
-		data.fftwOutput = fftw_alloc_complex(sizeof(fftw_complex) * m_audioSamplingSettings.numSamples);
-		data.fftwPlan = fftw_plan_dft_r2c_1d(
-			m_audioSamplingSettings.numSamples, data.fftwInput.data(), data.fftwOutput, FFTW_PATIENT | FFTW_DESTROY_INPUT
-		);
-		// Allocate vectors that are used by ImGui
-		data.dftOutputRaw.resize(m_audioSamplingSettings.numSamples / 2);
-
-		data.spectrumBuckets.resize(m_numSpectrumBuckets);
-	}
-
-	return true;
-}
-
-/*
-// returns a vector of size numBuckets + 1, fist and last will be min/max above
-std::vector<float> GLAudioVisApp::calculateBuckets(int numBuckets, float powerCurve)
-{
-	// set this according to human hearing ranges, or something
-	constexpr float minBucketFreq = 20.0f;
-	constexpr float maxBucketFreq = 20000.0f;
-
-	std::vector<float> buckets(numBuckets + 1);
-	buckets.front() = minBucketFreq;
-	buckets.back() = maxBucketFreq;
-
-	for (int i = 1; i < numBuckets; ++i)
-	{
-		float t = static_cast<float>(i) / static_cast<float>(numBuckets);
-		// t = pow(t, powerCurve);
-		buckets[i] = minBucketFreq + (maxBucketFreq - minBucketFreq) * t;
-	}
-	fmt::print("buckets: {}\n", buckets);
-
-	// std::vector<float> logBuckets = buckets;
-	std::for_each(buckets.begin(), buckets.end(), [](float& x){ x = log10(x); });
-	fmt::print("log buckets: {}\n", buckets);
-
-
-	return buckets;
-}
-*/
-
 bool GLAudioVisApp::initDrawingPipeline()
 {
 	m_outputShader = std::make_unique<const GLUtils::ShaderProgram>(
@@ -369,9 +241,6 @@ void GLAudioVisApp::run()
 			processEvent(event);
 		}
 
-		// Capture audio and perform FFT
-		// processAudio();
-
 		// our opengl render
 		drawFrame();
 
@@ -396,110 +265,7 @@ void GLAudioVisApp::run()
 
 void GLAudioVisApp::processEvent(const SDL_Event&)
 {
-}
-
-void GLAudioVisApp::processAudio()
-{
-	// const auto startTime1 = std::chrono::system_clock::now();
-
-	while (m_audioThreadActive)
-	{
-		const auto startTime2 = std::chrono::system_clock::now();
-
-		// This will block for a fixed amount of time
-		int error;
-		if (pa_simple_read(m_audioSource, m_audioSampleBuffer.data(), m_audioSampleBuffer.size(), &error) < 0)
-		{
-			fmt::print("GLAudioVisApp::processAudio: Failed to read: {}\n", pa_strerror(error));
-			return;
-		}
-
-		const auto endTime2 = std::chrono::system_clock::now();
-
-		// If we have more than 1 channel, unpack into the different data channels
-		const size_t numChannels = m_audioFFTData.size();
-		if (numChannels > 1)
-		{
-			// reinterpret as float array as it should match the sample size
-			assert(sizeof(float) == pa_sample_size_of_format(m_audioSamplingSettings.sampleFormat));
-			const float* buf = reinterpret_cast<float*>(m_audioSampleBuffer.data());
-			for (unsigned int i = 0; i < m_audioSamplingSettings.numSamples; ++i)
-			{
-				for (size_t j = 0; j < numChannels; ++j)
-				{
-					m_audioFFTData[j].fftwInput[i] = buf[numChannels * i + j];
-				}
-			}
-		}
-
-		// used for determining approx frequencies from the DFT sample index
-		static const float reciprocal = static_cast<float>(m_audioSamplingSettings.sampleRate) / static_cast<float>(m_audioSamplingSettings.numSamples);
-
-		// put these on seperate threads?
-		for (auto& fftData : m_audioFFTData)
-		{
-			// run the DFT
-			fftw_execute(fftData.fftwPlan);
-
-			// first lower the values in the buckets by the smoothing factor
-			for (auto& bucket : fftData.spectrumBuckets)
-			{
-				bucket *= m_histogramSmoothing;
-			}
-
-			// we only care about samples in the DFT that are below the nyquist frequency (midpoint)
-			for (unsigned int i = 0; i < (m_audioSamplingSettings.numSamples / 2); ++i)
-			{
-				const fftw_complex& sample = fftData.fftwOutput[i];
-				const float amplitude = 10.0f * log10(sample[0] * sample[0] + sample[1] * sample[1]);
-				// const float amplitude = sqrt(sample[0] * sample[0] + sample[1] * sample[1]);
-				// const float amplitude = sample[0] + sample[1]; // no need to sqrt
-				fftData.dftOutputRaw[i] = amplitude;
-
-				// Frequency is approximate, based on the sample size, so it never fills the buckets properly :/
-				const float freq = log10(static_cast<float>(i) * reciprocal);
-				float t = (freq - minBucketFreqLog) / (maxBucketFreqLog - minBucketFreqLog);
-				int idx = std::max(std::min(int(t * m_numSpectrumBuckets), m_numSpectrumBuckets), 0);
-				fftData.spectrumBuckets[idx] = amplitude > fftData.spectrumBuckets[idx] ?
-					amplitude :
-					fftData.spectrumBuckets[idx];
-
-				// for (int j = 0; j < m_numSpectrumBuckets; ++j)
-				// {
-				// 	// freqBuckets is sized m_numSpectrumBuckets + 1, so this is safe
-				// 	if (freq > m_spectrumBuckets[j] && freq < m_spectrumBuckets[j + 1])
-				// 	{
-				// 		fftData.spectrumBuckets[j] = amplitude > fftData.spectrumBuckets[j] ?
-				// 			amplitude :
-				// 			fftData.spectrumBuckets[j];
-				// 		break;
-				// 	}
-				// }
-			}
-		}
-
-		const auto endTime3 = std::chrono::system_clock::now();
-		audioProcessingTime2 = std::chrono::duration_cast<std::chrono::milliseconds>(endTime2 - startTime2).count();
-		audioProcessingTime3 = std::chrono::duration_cast<std::chrono::milliseconds>(endTime3 - endTime2).count();
-		audioProcessingTime1 = audioProcessingTime2 + audioProcessingTime3;
-	}
-
-	// const auto endTime1 = std::chrono::system_clock::now();
-	// audioProcessingTime1 = std::chrono::duration_cast<std::chrono::milliseconds>(endTime1 - startTime1).count();
-}
-
-void GLAudioVisApp::toggleRecording()
-{
-	m_audioThreadActive = !m_audioThreadActive;
-
-	if (m_audioThreadActive)
-	{
-		m_audioThread = std::thread(&GLAudioVisApp::processAudio, this);
-	}
-	else
-	{
-		m_audioThread.join();
-	}
+	// pass through to m_audioEngine?
 }
 
 void GLAudioVisApp::drawFrame()
@@ -510,6 +276,8 @@ void GLAudioVisApp::drawFrame()
 
 	m_outputShader->use();
 
+	// TODO: SoA rather than AoS?
+/*
 	{
 		GLUtils::scopedTimer(uniformTimer);
 
@@ -524,7 +292,7 @@ void GLAudioVisApp::drawFrame()
 		// glUniform1fv(dftRightLoc, dftSize, m_audioFFTData[1].spectrumBuckets.data());
 
 	}
-
+*/
 	// The vertex shader will create a screen space quad, so no need to bind a different VAO & VBO
 	glDrawArrays(GL_TRIANGLES, 0, 6);
 }
@@ -576,7 +344,7 @@ void GLAudioVisApp::drawGUI()
 	}
 
 	ImGui::Separator();
-
+/*
 	ImGui::Text("Audio Sample Size: %lu", pa_sample_size_of_format(m_audioSamplingSettings.sampleFormat));
 	ImGui::Text("Audio Samples: %u", m_audioSamplingSettings.numSamples);
 
@@ -585,13 +353,14 @@ void GLAudioVisApp::drawGUI()
 	ImGui::Text("Audio Processing Time Total: %.1fms", audioProcessingTime1);
 	ImGui::Text("\tTime 1: %fms", audioProcessingTime2);
 	ImGui::Text("\tTime 2: %fms", audioProcessingTime3);
-
+*/
 	{
-		if (ImGui::Button(!m_audioThreadActive ? "Start Recording" : "Stop Recording"))
+		if (ImGui::Button(!m_audioEngine.isRecordingActive() ? "Start Recording" : "Stop Recording"))
 		{
-			toggleRecording();
+			m_audioEngine.toggleRecording();
 		}
 
+		/*
 		bool spectrumChanged = false;
 		spectrumChanged = ImGui::SliderInt("##NumBuckets", &m_numSpectrumBuckets, 1, 100, "Num Spectrum Buckets: %i");
 		if (spectrumChanged)
@@ -668,6 +437,7 @@ void GLAudioVisApp::drawGUI()
 		}
 
 		ImGui::Columns(1); // reset the column count
+		*/
 	}
 
 	ImGui::End();

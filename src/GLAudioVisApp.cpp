@@ -32,6 +32,8 @@ namespace
 	// constexpr float freqBuckets[] = { 20.0f, 140.0f, 400.0f, 2600.0f, 5200.0f, std::numeric_limits<float>::max() };
 };
 
+using namespace gaz;
+
 int GLAudioVisApp::execute(int argc, char* argv[])
 {
 	if (argc > 1)

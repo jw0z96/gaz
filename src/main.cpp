@@ -2,5 +2,5 @@
 
 int main(int argc, char* argv[])
 {
-	return GLAudioVisApp::execute(argc, argv);
+	return gaz::GLAudioVisApp::execute(argc, argv);
 }

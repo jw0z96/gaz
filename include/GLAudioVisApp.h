@@ -16,6 +16,9 @@
 #include "GLUtils/ShaderProgram.h"
 #include "GLUtils/VAO.h"
 
+namespace gaz
+{
+
 class GLAudioVisApp
 {
 public:
@@ -150,7 +153,13 @@ private:
 
 	float m_histogramSmoothing;
 
+
+	// AudioEngine m_audioEngine;
+
+
 	std::unique_ptr<const GLUtils::ShaderProgram> m_outputShader;
 
 	std::unique_ptr<const GLUtils::VAO> m_emptyVAO;
 };
+
+}

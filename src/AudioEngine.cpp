@@ -1,5 +1,7 @@
 #include "AudioEngine.h"
 
+#include <imgui/imgui.h>
+
 #include <pulse/error.h>
 
 #include <cassert>
@@ -139,7 +141,7 @@ void AudioEngine::startRecording()
 
 	while (m_recordingActive)
 	{
-		// const auto startTime2 = std::chrono::system_clock::now();
+		const auto startTime2 = std::chrono::system_clock::now();
 
 		// This will block for a fixed amount of time
 		int error;
@@ -150,7 +152,7 @@ void AudioEngine::startRecording()
 		}
 
 		// const auto endTime2 = std::chrono::system_clock::now();
-
+		/*
 		// If we have more than 1 channel, unpack into the different data channels
 		const unsigned int& numChannels = m_samplingSettings.numChannels;
 		if (numChannels > 1)
@@ -212,11 +214,16 @@ void AudioEngine::startRecording()
 				// }
 			}
 		}
+		*/
 
-		// const auto endTime3 = std::chrono::system_clock::now();
+		const auto endTime3 = std::chrono::system_clock::now();
 		// audioProcessingTime2 = std::chrono::duration_cast<std::chrono::milliseconds>(endTime2 - startTime2).count();
 		// audioProcessingTime3 = std::chrono::duration_cast<std::chrono::milliseconds>(endTime3 - endTime2).count();
 		// audioProcessingTime1 = audioProcessingTime2 + audioProcessingTime3;
+		fmt::print("AudioEngine::startRecording::elapsed: recorded {} bytes\n", m_sampleBuffer.size());
+		fmt::print("AudioEngine::startRecording::elapsed: {}ms\n", std::chrono::duration_cast<std::chrono::milliseconds>(endTime3 - startTime2).count());
+
+
 	}
 
 	fmt::print("AudioEngine::startRecording::end\n");
@@ -250,3 +257,67 @@ std::vector<float> GLAudioVisApp::calculateBuckets(int numBuckets, float powerCu
 	return buckets;
 }
 */
+
+// ImGui Helper Functions
+void AudioEngine::plotInputPCM(
+	const Channel& channel,
+	const char* label,
+	const char* overlay,
+	const ImVec2& size
+)
+{
+	// Cast the start of the buffer to a float array, since that's what ImGui needs to plot lines, and sizeof(float)
+	// matches m_bytesPerSample
+	assert(sizeof(float) == pa_sample_size_of_format(m_samplingSettings.sampleFormat));
+	const float* buf = reinterpret_cast<float*>(m_sampleBuffer.data());
+
+	ImGui::PlotLines(
+		label,
+		&buf[static_cast<unsigned char>(channel)], // start index
+		m_samplingSettings.numSamples / m_samplingSettings.numChannels,
+		0,
+		overlay,
+		-1.0f,
+		1.0f,
+		size,
+		sizeof(float) * m_samplingSettings.numChannels // stride
+	);
+}
+
+void AudioEngine::plotDFT(
+	const Channel& channel,
+	const char* label,
+	const char* overlay,
+	const ImVec2& size
+)
+{
+	ImGui::PlotLines(
+		label,
+		m_fftData[static_cast<unsigned char>(channel)].dftOutputRaw.data(),
+		m_fftData[static_cast<unsigned char>(channel)].dftOutputRaw.size(),
+		0,
+		overlay,
+		0.0f,
+		48.0f,
+		size
+	);
+}
+
+void AudioEngine::plotSpectrum(
+	const Channel& channel,
+	const char* label,
+	const char* overlay,
+	const ImVec2& size
+)
+{
+	ImGui::PlotHistogram(
+		label,
+		m_fftData[static_cast<unsigned char>(channel)].spectrumBuckets.data(),
+		m_numSpectrumBuckets,
+		0,
+		overlay,
+		0.0f,
+		48.0f,
+		size
+	);
+}

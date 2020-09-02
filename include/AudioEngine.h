@@ -1,5 +1,7 @@
 #pragma once
 
+#include <imgui/imgui.h>
+
 #include <pulse/simple.h>
 
 #include <fmt/core.h>
@@ -18,7 +20,7 @@ public:
 
 	enum struct Channel
 	{
-		Left = 0,
+		Left = 0, // default for mono
 		Right = 1
 	};
 
@@ -41,6 +43,7 @@ public:
 		m_histogramSmoothing{0.0f}
 	{
 		fmt::print("AudioEngine()\n");
+		assert(m_samplingSettings.numChannels <= 2); // to match the Channel enum
 	}
 
 	~AudioEngine();
@@ -58,6 +61,30 @@ public:
 	void toggleRecording();
 
 	bool isRecordingActive() const { return m_recordingActive; }
+
+	const SamplingSettings& getSamplingSettings() const { return m_samplingSettings; }
+
+	// ImGui Helper Functions
+	void plotInputPCM(
+		const Channel& channel,
+		const char* label,
+		const char* overlay,
+		const ImVec2& size
+	);
+
+	void plotDFT(
+		const Channel& channel,
+		const char* label,
+		const char* overlay,
+		const ImVec2& size
+	);
+
+	void plotSpectrum(
+		const Channel& channel,
+		const char* label,
+		const char* overlay,
+		const ImVec2& size
+	);
 
 private:
 

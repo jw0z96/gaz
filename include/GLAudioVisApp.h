@@ -32,7 +32,7 @@ private:
 		m_audioEngine
 		({
 			2, // numChannels
-			48000, // sampleRate
+			44100, // sampleRate
 			1024, // numSamples
 			PA_SAMPLE_FLOAT32LE, // sample format
 		}),

@@ -314,7 +314,7 @@ void GLAudioVisApp::drawGUI()
 
 	const float frameTime = GLUtils::getElapsed(frameTimer);
 	ImGui::Text("Frame time: %.1f ms (%.1f fps)", frameTime, 1000.0f / frameTime);
-	ImGui::Text("\tUniform update time: %.1fms", GLUtils::getElapsed(uniformTimer));
+	// ImGui::Text("\tUniform update time: %.1fms", GLUtils::getElapsed(uniformTimer));
 
 	// create a plot of the frame times
 	{
@@ -335,7 +335,7 @@ void GLAudioVisApp::drawGUI()
 		}
 		average *= numFrameSamplesReciprocal;
 
-		const auto overlay = fmt::format("Average {0:.1f} ms ({0:.1f} fps)", average, 1000.0f / average);
+		const auto overlay = fmt::format("Average {:.1f} ms ({:.1f} fps)", average, 1000.0f / average);
 
 		ImGui::SetNextItemWidth(currentWidth);
 		ImGui::PlotLines("##FrameTimes", frameTimes, numFrameSamples, frameOffset, overlay.c_str(), 0.0f, 100.0f, ImVec2(0,80));
@@ -344,12 +344,12 @@ void GLAudioVisApp::drawGUI()
 	}
 
 	ImGui::Separator();
-/*
-	ImGui::Text("Audio Sample Size: %lu", pa_sample_size_of_format(m_audioSamplingSettings.sampleFormat));
-	ImGui::Text("Audio Samples: %u", m_audioSamplingSettings.numSamples);
+
+	ImGui::Text("Audio Sample Size: %lu", pa_sample_size_of_format(m_audioEngine.getSamplingSettings().sampleFormat));
+	ImGui::Text("Audio Samples: %u", m_audioEngine.getSamplingSettings().numSamples);
 
 	ImGui::NewLine();
-
+/*
 	ImGui::Text("Audio Processing Time Total: %.1fms", audioProcessingTime1);
 	ImGui::Text("\tTime 1: %fms", audioProcessingTime2);
 	ImGui::Text("\tTime 2: %fms", audioProcessingTime3);
@@ -380,64 +380,53 @@ void GLAudioVisApp::drawGUI()
 
 		ImGui::SetNextItemWidth(currentWidth);
 		ImGui::SliderFloat("##Smoothing", &m_histogramSmoothing, 0.0f, 1.0f, "Histogram Smoothing: %.1f");
+		*/
 
-		// Cast the start of the buffer to a float array, since that's what ImGui needs to plot lines, and sizeof(float)
-		// matches m_bytesPerSample
-		assert(sizeof(float) == pa_sample_size_of_format(m_audioSamplingSettings.sampleFormat));
-		const float* buf = reinterpret_cast<float*>(m_audioSampleBuffer.data());
 
-		ImGui::Columns(m_audioSamplingSettings.numChannels);
-		for (unsigned int i = 0; i < m_audioSamplingSettings.numChannels; ++i)
+		ImGui::Columns(m_audioEngine.getSamplingSettings().numChannels);
+		for (unsigned int i = 0; i < m_audioEngine.getSamplingSettings().numChannels; ++i)
 		{
 			const auto& columnWidth = ImGui::GetColumnWidth();
-			const auto& fftData = m_audioFFTData[i];
-			const char* channelNameShort = fftData.channelID == AudioChannel::Left ? "L" : "R";
-			const char* channelNameLong = fftData.channelID == AudioChannel::Left ? "Left" : "Right";
+			// const auto& fftData = m_audioFFTData[i];
+
+			// const AudioEngine::Channel channel = AudioEngine::Channel(i);
+			const AudioEngine::Channel channel = static_cast<AudioEngine::Channel>(i);
+			const char* channelNameShort = channel == AudioEngine::Channel::Left ? "L" : "R";
+			const char* channelNameLong = channel == AudioEngine::Channel::Left ? "Left" : "Right";
 
 			ImGui::Text("%s (%s)", channelNameShort, channelNameLong);
 
 			// Raw PCM
-			ImGui::PlotLines(
+			m_audioEngine.plotInputPCM(
+				channel,
 				fmt::format("##AudioSamples{}", channelNameShort).c_str(),
-				&buf[i],
-				m_audioSamplingSettings.numSamples / 2,
-				0,
 				fmt::format("Raw PCM ({})", channelNameShort).c_str(),
-				-1.0f,
-				1.0f,
-				ImVec2(columnWidth, 80),
-				sizeof(float) * 2 // stride
+				ImVec2(columnWidth, 80)
 			);
 
+/*
 			// Raw DFT
-			ImGui::PlotLines(
+			m_audioEngine.plotDFT(
+				channel,
 				fmt::format("##fftOutputRaw{}", channelNameShort).c_str(),
-				fftData.dftOutputRaw.data(),
-				fftData.dftOutputRaw.size(),
-				0,
 				fmt::format("Raw DFT ({})", channelNameShort).c_str(),
-				0.0f,
-				48.0f,
 				ImVec2(columnWidth, 80)
 			);
 
 			// Histogram
-			ImGui::PlotHistogram(
+			m_audioEngine.plotSpectrum(
+				channel,
 				fmt::format("##AudioHistogram{}", channelNameShort).c_str(),
-				fftData.spectrumBuckets.data(),
-				m_numSpectrumBuckets,
-				0,
 				fmt::format("Histogram ({})", channelNameShort).c_str(),
-				0.0f,
-				48.0f,
-				ImVec2(columnWidth, 80.0f)
+				ImVec2(columnWidth, 80)
 			);
+*/
 
 			ImGui::NextColumn();
 		}
 
 		ImGui::Columns(1); // reset the column count
-		*/
+
 	}
 
 	ImGui::End();

@@ -8,6 +8,8 @@
 #include <imgui/imgui_impl_sdl.h>
 #include <imgui/imgui_impl_opengl3.h>
 
+#include <glm/gtc/type_ptr.hpp>
+
 #include <chrono>
 
 #include "GLUtils/Timer.h"
@@ -197,7 +199,8 @@ bool GLAudioVisApp::initDrawingPipeline()
 	m_outputShader = std::make_unique<const GLUtils::ShaderProgram>(
 		std::list<GLUtils::ShaderProgram::ShaderComponent>
 		{
-			{ GL_VERTEX_SHADER, "shaders/screenspace.vert" },
+			// { GL_VERTEX_SHADER, "shaders/screenspace.vert" },
+			{ GL_VERTEX_SHADER, "shaders/cube.vert" },
 			{ GL_FRAGMENT_SHADER, "shaders/output.frag" }
 		}
 	);
@@ -213,11 +216,28 @@ bool GLAudioVisApp::initDrawingPipeline()
 	m_emptyVAO = std::make_unique<const GLUtils::VAO>();
 	m_emptyVAO->bind();
 
+	// set shader uniform
+	glUniform1i(m_outputShader->getUniformLocation("dftTexture"), 0);
+	glUniform1ui(m_outputShader->getUniformLocation("dftLastIndex"), m_sampleIndexDFT);
+	glUniform3ui(
+		m_outputShader->getUniformLocation("cubeDimensions"),
+		32, 32, 32
+	);
+
+	// set projection
+	m_camera.setDistance(5.0f);
+	m_camera.setCenter({0.5f, 0.5f, 0.5f});
+	m_camera.setAspect(DEFAULT_SCREEN_WIDTH, DEFAULT_SCREEN_HEIGHT);
+	glUniformMatrix4fv(
+		m_outputShader->getUniformLocation("projection"),
+		1,
+		GL_FALSE,
+		glm::value_ptr(m_camera.getProjection())
+	);
+
 	// dft texture will occupy shader unit 0
 	glActiveTexture(GL_TEXTURE0);
 	glUniform1i(m_outputShader->getUniformLocation("dftTexture"), 0);
-	glUniform1ui(m_outputShader->getUniformLocation("dftLastIndex"), m_sampleIndexDFT);
-	glUniform1ui(m_outputShader->getUniformLocation("dftSampleCount"), m_sampleCountDFT);
 
 	m_dftTexture = std::make_unique<const GLUtils::Texture>();
 	m_dftTexture->bindAs(GL_TEXTURE_3D);
@@ -238,10 +258,14 @@ bool GLAudioVisApp::initDrawingPipeline()
 
 	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_MIRRORED_REPEAT);
 	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_REPEAT); // doesn't matter
+	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_BORDER); // does matter
 	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	// glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	// glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+	// enable programmable point size in vertex shaders, no better place to put this?
+	glEnable(GL_PROGRAM_POINT_SIZE);
 
 	glDisable(GL_DEPTH_TEST);
 
@@ -293,9 +317,26 @@ void GLAudioVisApp::run()
 	}
 }
 
-void GLAudioVisApp::processEvent(const SDL_Event&)
+void GLAudioVisApp::processEvent(const SDL_Event& event)
 {
 	// pass through to m_audioEngine?
+
+	if(event.type == SDL_WINDOWEVENT &&
+		(event.window.event == SDL_WINDOWEVENT_RESIZED ||
+			event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED))
+	{
+		m_camera.setAspect(event.window.data1, event.window.data2);
+		m_outputShader->use();
+		static const auto projectionLoc = m_outputShader->getUniformLocation("projection");
+		glUniformMatrix4fv(
+			projectionLoc,
+			1,
+			GL_FALSE,
+			glm::value_ptr(m_camera.getProjection())
+		);
+	}
+
+	m_camera.processInput(event);
 }
 
 void GLAudioVisApp::drawFrame()
@@ -349,8 +390,17 @@ void GLAudioVisApp::drawFrame()
 		}
 	}
 
+	static const auto viewLoc = m_outputShader->getUniformLocation("view");
+	glUniformMatrix4fv(
+		viewLoc,
+		1,
+		GL_FALSE,
+		glm::value_ptr(m_camera.getView())
+	);
+
 	// The vertex shader will create a screen space quad, so no need to bind a different VAO & VBO
-	glDrawArrays(GL_TRIANGLES, 0, 6);
+	constexpr unsigned int pointCount = 32 * 32 * 32;
+	glDrawArrays(GL_POINTS, 0, pointCount);
 }
 
 void GLAudioVisApp::drawGUI()

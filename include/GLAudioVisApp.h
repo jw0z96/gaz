@@ -13,6 +13,7 @@
 #include "GLUtils/Texture.h"
 
 #include "AudioEngine.h"
+#include "OrbitalCamera.h"
 
 namespace gaz
 {
@@ -41,7 +42,8 @@ private:
 		m_emptyVAO{nullptr},
 		m_dftTexture{nullptr},
 		m_sampleCountDFT{32u},
-		m_sampleIndexDFT{0u}
+		m_sampleIndexDFT{0u},
+		m_camera()
 	{
 		fmt::print("GLAudioVisApp()\n");
 	}
@@ -108,6 +110,9 @@ private:
 	std::unique_ptr<const GLUtils::Texture> m_dftTexture;
 	unsigned int m_sampleCountDFT;
 	unsigned int m_sampleIndexDFT;
+
+	// Camera
+	OrbitalCamera m_camera;
 };
 
 }

@@ -220,11 +220,11 @@ bool GLAudioVisApp::initDrawingPipeline()
 	glUniform1ui(m_outputShader->getUniformLocation("dftSampleCount"), m_sampleCountDFT);
 
 	m_dftTexture = std::make_unique<const GLUtils::Texture>();
-	m_dftTexture->bindAs(GL_TEXTURE_2D_ARRAY);
+	m_dftTexture->bindAs(GL_TEXTURE_3D);
 
 	// Float texture, [dftSize * numChannels]
 	glTexImage3D(
-		GL_TEXTURE_2D_ARRAY,
+		GL_TEXTURE_3D,
 		0,
 		GL_R32F,
 		m_audioEngine.getSamplingSettings().numSamples / 2,
@@ -236,12 +236,12 @@ bool GLAudioVisApp::initDrawingPipeline()
 		nullptr
 	);
 
-	glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_MIRRORED_REPEAT);
-	glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_REPEAT); // doesn't matter
-	glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-	// glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	// glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_MIRRORED_REPEAT);
+	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_REPEAT); // doesn't matter
+	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	// glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	// glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
 	glDisable(GL_DEPTH_TEST);
 
@@ -307,7 +307,7 @@ void GLAudioVisApp::drawFrame()
 	m_outputShader->use();
 
 	glActiveTexture(GL_TEXTURE0);
-	m_dftTexture->bindAs(GL_TEXTURE_2D_ARRAY);
+	m_dftTexture->bindAs(GL_TEXTURE_3D);
 
 	// TODO: SoA rather than AoS?
 	if (m_audioEngine.isRecordingActive())
@@ -324,7 +324,7 @@ void GLAudioVisApp::drawFrame()
 		if (dftSample.has_value())
 		{
 			glTexSubImage3D(
-				GL_TEXTURE_2D_ARRAY,
+				GL_TEXTURE_3D,
 				0,
 				0, // x offset
 				0, // left
@@ -347,31 +347,6 @@ void GLAudioVisApp::drawFrame()
 		{
 			fmt::print("dft sample not ready!\n");
 		}
-/*
-		// index on this one is messed up
-		const auto dftSampleRight = m_audioEngine.requestDFT(AudioEngine::Channel::Right);
-		if (dftSampleRight.has_value())
-		{
-			glTexSubImage3D(
-				GL_TEXTURE_2D_ARRAY,
-				0,
-				0, // x offset
-				1, // right
-				m_sampleIndexDFT,
-				m_audioEngine.getSamplingSettings().numSamples / 2,
-				1,
-				1,
-				GL_RED,
-				GL_FLOAT,
-				dftSampleRight.value().data()
-			);
-
-			glUniform1ui(dftIndexLoc, m_sampleIndexDFT);
-
-			m_sampleIndexDFT = (m_sampleIndexDFT + 1) % m_sampleCountDFT;
-
-		}
-*/
 	}
 
 	// The vertex shader will create a screen space quad, so no need to bind a different VAO & VBO

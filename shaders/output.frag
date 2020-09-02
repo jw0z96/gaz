@@ -1,6 +1,6 @@
 #version 430
 
-uniform sampler2DArray dftTexture;
+uniform sampler3D dftTexture;
 uniform uint dftLastIndex;
 uniform uint dftSampleCount;
 
@@ -19,15 +19,21 @@ void main()
 
 	float amp = 0.0f;
 
-	const uint numSamples = uint(dftSampleCount * smoothingFactor);
+	// const uint numSamples = uint(dftSampleCount * smoothingFactor);
+	const uint numSamples = 32;
 	for (uint i = 0; i < numSamples; ++i)
 	{
-		float j = (dftLastIndex - i) % dftSampleCount;
+		float offset = ((dftLastIndex - i) % dftSampleCount) / float(dftSampleCount); // z offset, since we can't use textureOffset
 		float falloff = 1.0f - (float(i) / float(numSamples));
-		amp = max(amp, texture(dftTexture, vec3(logUV, j)).r * falloff);
+		amp = max(
+			amp,
+			texture(
+				dftTexture,
+				vec3(logUV, offset)
+			).r * falloff
+		);
 	}
 
-	// amp /= 32.0f;
 	amp /= 48.0f;
 
 	// float amp = texture(dftTexture, vec3(logUV, dftLastIndex)).r / 48.0f;

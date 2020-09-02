@@ -86,6 +86,18 @@ public:
 		const ImVec2& size
 	);
 
+	// Histogram display controls
+	void setSpectrumBucketCount(unsigned int bucketCount);
+
+	unsigned int getSpectrumBucketCount() const { return m_numSpectrumBuckets; }
+
+	void setHistogramSmoothing(float smoothing) { m_histogramSmoothing = smoothing; }
+
+	float getHistogramSmoothing() const { return m_histogramSmoothing; }
+
+	// Access for OpenGL buffers
+	const std::vector<float> getDFT(const Channel& channel) const;
+
 private:
 
 	void startRecording();
@@ -102,10 +114,7 @@ private:
 	bool m_recordingActive;
 	std::unique_ptr<std::thread> m_recordingThread;
 
-
 	int m_numSpectrumBuckets;
-	// float m_spectrumPowerCurve;
-	// std::vector<float> m_spectrumBuckets;
 
 	struct FFTData
 	{
@@ -122,7 +131,6 @@ private:
 	std::vector<FFTData> m_fftData;
 
 	float m_histogramSmoothing;
-
 };
 
 }

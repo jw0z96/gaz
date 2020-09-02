@@ -58,11 +58,18 @@ bool AudioEngine::init()
 		.channels = m_samplingSettings.numChannels
 	};
 
-	// pa_buffer_attr ba;
-	// ba.maxlength = 1024; // max length of the buffer
-	// ba.tlength = (uint32_t)-1; // target buffer length (bytes) ?  playback only?
-	// ba.minreq = 1024; // minimum request ?
-	// ba.fragsize = 1024; // fragment size (bytes) recording only?
+	const unsigned int bufferSize = pa_frame_size(&sampleFormat) * m_samplingSettings.numSamples;
+
+	pa_buffer_attr bufferAttributes
+	{
+		.maxlength = bufferSize, // max length of the buffer in bytes
+		.tlength = (uint32_t)-1, // target buffer length (bytes) ?  playback only?
+		.prebuf = (uint32_t)-1, // prebuffering (playback only)
+		.minreq = (uint32_t)-1, // minimum request (playback only
+		// fragment size (bytes?) (recording only)
+		// .fragsize = bufferSize // works, varying bocking times
+		.fragsize = 0 // much more consistent
+	};
 
 	// TODO: command line option
 	// const std::string source = "alsa_input.pci-0000_00_1b.0.analog-stereo";
@@ -71,15 +78,15 @@ bool AudioEngine::init()
 	// connect to the PulseAudio server
 	int error;
 	m_source = pa_simple_new(
-		nullptr,			// Use the default server.
-		"GLAudioVis",		// Our application's name.
+		nullptr,			// Use the default server
+		"GLAudioVisApp",	// Our application's name
 		PA_STREAM_RECORD,	// Connection Mode
-		source.c_str(),		// Use the default device.
-		"Record",			// Description of our stream.
-		&sampleFormat,		// Our sample format.
+		source.c_str(),		// Use the specified device
+		"Record",			// Description of our stream
+		&sampleFormat,		// Our sample format
 		nullptr,			// Use default channel map
-		nullptr,			// Use default buffering attributes.
-		&error				// Error code.
+		&bufferAttributes,	// Use buffering attributes
+		&error				// Error code
 	);
 
 	if (m_source == nullptr)
@@ -94,10 +101,8 @@ bool AudioEngine::init()
 	}
 
 	// resize the buffer to accomodate for the read size (bytes)
-	// m_samplingSettings.numSamples = sampleFormat.rate; // 1 sec of audio samples
-	const size_t bufferSize = pa_sample_size_of_format(m_samplingSettings.sampleFormat) * m_samplingSettings.numSamples * m_samplingSettings.numChannels;
-	fmt::print("buffer size: {}\n", bufferSize);
 	m_sampleBuffer.resize(bufferSize);
+	fmt::print("buffer size: {}\n", bufferSize);
 
 	// Since we need to keep the references passed to fftwPlan intact, default construct 'numchannels' elements,
 	// then fill them
@@ -105,16 +110,16 @@ bool AudioEngine::init()
 	for (size_t i = 0; i < m_samplingSettings.numChannels; ++i)
 	{
 		FFTData& data = m_fftData[i];
-		data.channelID = static_cast<Channel>(i);
+		data.channelID = Channel(i);
 		// Prepare data for fftw
 		data.fftwInput.resize(m_samplingSettings.numSamples);
 		data.fftwOutput = fftw_alloc_complex(sizeof(fftw_complex) * m_samplingSettings.numSamples);
 		data.fftwPlan = fftw_plan_dft_r2c_1d(
 			m_samplingSettings.numSamples, data.fftwInput.data(), data.fftwOutput, FFTW_PATIENT | FFTW_DESTROY_INPUT
 		);
-		// Allocate vectors that are used by ImGui
-		data.dftOutputRaw.resize(m_samplingSettings.numSamples / 2);
 
+		// Allocate vectors that are used by ImGui / OpenGL
+		data.dftOutputRaw.resize(m_samplingSettings.numSamples / 2);
 		data.spectrumBuckets.resize(m_numSpectrumBuckets);
 	}
 
@@ -141,18 +146,17 @@ void AudioEngine::startRecording()
 
 	while (m_recordingActive)
 	{
-		const auto startTime2 = std::chrono::system_clock::now();
+		const auto startTime = std::chrono::system_clock::now();
 
 		// This will block for a fixed amount of time
 		int error;
 		if (pa_simple_read(m_source, m_sampleBuffer.data(), m_sampleBuffer.size(), &error) < 0)
 		{
 			fmt::print("AudioEngine::startRecording: Failed to read: {}\n", pa_strerror(error));
+			m_recordingActive = false;
 			return;
 		}
 
-		// const auto endTime2 = std::chrono::system_clock::now();
-		/*
 		// If we have more than 1 channel, unpack into the different data channels
 		const unsigned int& numChannels = m_samplingSettings.numChannels;
 		if (numChannels > 1)
@@ -214,16 +218,14 @@ void AudioEngine::startRecording()
 				// }
 			}
 		}
-		*/
 
-		const auto endTime3 = std::chrono::system_clock::now();
-		// audioProcessingTime2 = std::chrono::duration_cast<std::chrono::milliseconds>(endTime2 - startTime2).count();
-		// audioProcessingTime3 = std::chrono::duration_cast<std::chrono::milliseconds>(endTime3 - endTime2).count();
-		// audioProcessingTime1 = audioProcessingTime2 + audioProcessingTime3;
-		fmt::print("AudioEngine::startRecording::elapsed: recorded {} bytes\n", m_sampleBuffer.size());
-		fmt::print("AudioEngine::startRecording::elapsed: {}ms\n", std::chrono::duration_cast<std::chrono::milliseconds>(endTime3 - startTime2).count());
+		// std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 
-
+		const auto endTime = std::chrono::system_clock::now();
+		fmt::print("AudioEngine::startRecording::elapsed: recorded {} bytes ({}ms)\n",
+			m_sampleBuffer.size(),
+			std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime).count()
+		);
 	}
 
 	fmt::print("AudioEngine::startRecording::end\n");
@@ -320,4 +322,20 @@ void AudioEngine::plotSpectrum(
 		48.0f,
 		size
 	);
+}
+
+void AudioEngine::setSpectrumBucketCount(unsigned int bucketCount)
+{
+	m_numSpectrumBuckets = bucketCount;
+
+	for (auto& fftData : m_fftData)
+	{
+		fftData.spectrumBuckets.clear();
+		fftData.spectrumBuckets.resize(bucketCount);
+	}
+}
+
+const std::vector<float> AudioEngine::getDFT(const Channel& channel) const
+{
+	return m_fftData[static_cast<unsigned char>(channel)].dftOutputRaw;
 }

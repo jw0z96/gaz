@@ -14,8 +14,8 @@
 
 namespace
 {
-	constexpr unsigned int DEFAULT_SCREEN_WIDTH = 800; // 1024;
-	constexpr unsigned int DEFAULT_SCREEN_HEIGHT = 600; // 768;
+	constexpr unsigned int DEFAULT_SCREEN_WIDTH = 1024; // 800;
+	constexpr unsigned int DEFAULT_SCREEN_HEIGHT = 768; // 600;
 
 	float runLoopElapsed = 0.0f;
 };
@@ -156,7 +156,7 @@ bool GLAudioVisApp::initGLContext()
 		return false;
 	}
 
-	// disable vsync in the OpenGL context, TODO: set this in some kind of config?
+	// enable vsync in the OpenGL context, TODO: set this in some kind of config?
 	SDL_GL_SetSwapInterval(1);
 
 	// initialize GLEW once we have a valid GL context - TODO: GLAD?
@@ -277,22 +277,18 @@ void GLAudioVisApp::drawFrame()
 	m_outputShader->use();
 
 	// TODO: SoA rather than AoS?
-/*
 	{
 		GLUtils::scopedTimer(uniformTimer);
 
-		constexpr size_t dftSize = 512;
-
 		static const auto dftLeftLoc = m_outputShader->getUniformLocation("u_dftLeft[0]");
-		glUniform1fv(dftLeftLoc, dftSize, m_audioFFTData[0].dftOutputRaw.data());
-		// glUniform1fv(dftLeftLoc, dftSize, m_audioFFTData[0].spectrumBuckets.data());
+		const auto leftDFT = m_audioEngine.getDFT(AudioEngine::Channel::Left);
+		glUniform1fv(dftLeftLoc, leftDFT.size(), leftDFT.data());
 
 		static const auto dftRightLoc = m_outputShader->getUniformLocation("u_dftRight[0]");
-		glUniform1fv(dftRightLoc, dftSize, m_audioFFTData[1].dftOutputRaw.data());
-		// glUniform1fv(dftRightLoc, dftSize, m_audioFFTData[1].spectrumBuckets.data());
-
+		const auto rightDFT = m_audioEngine.getDFT(AudioEngine::Channel::Right);
+		glUniform1fv(dftRightLoc, rightDFT.size(), rightDFT.data());
 	}
-*/
+
 	// The vertex shader will create a screen space quad, so no need to bind a different VAO & VBO
 	glDrawArrays(GL_TRIANGLES, 0, 6);
 }
@@ -314,7 +310,7 @@ void GLAudioVisApp::drawGUI()
 
 	const float frameTime = GLUtils::getElapsed(frameTimer);
 	ImGui::Text("Frame time: %.1f ms (%.1f fps)", frameTime, 1000.0f / frameTime);
-	// ImGui::Text("\tUniform update time: %.1fms", GLUtils::getElapsed(uniformTimer));
+	ImGui::Text("\tUniform update time: %.1fms", GLUtils::getElapsed(uniformTimer));
 
 	// create a plot of the frame times
 	{
@@ -324,7 +320,6 @@ void GLAudioVisApp::drawGUI()
 		static float frameTimes[numFrameSamples] = { 0.0f };
 		// this will be used as an index to update with the latest data, and to rotate the array in the display
 		static unsigned int frameOffset = 0;
-
 		frameTimes[frameOffset] = frameTime;
 
 		// average the frame samples
@@ -348,49 +343,32 @@ void GLAudioVisApp::drawGUI()
 	ImGui::Text("Audio Sample Size: %lu", pa_sample_size_of_format(m_audioEngine.getSamplingSettings().sampleFormat));
 	ImGui::Text("Audio Samples: %u", m_audioEngine.getSamplingSettings().numSamples);
 
-	ImGui::NewLine();
-/*
-	ImGui::Text("Audio Processing Time Total: %.1fms", audioProcessingTime1);
-	ImGui::Text("\tTime 1: %fms", audioProcessingTime2);
-	ImGui::Text("\tTime 2: %fms", audioProcessingTime3);
-*/
 	{
 		if (ImGui::Button(!m_audioEngine.isRecordingActive() ? "Start Recording" : "Stop Recording"))
 		{
 			m_audioEngine.toggleRecording();
 		}
 
-		/*
-		bool spectrumChanged = false;
-		spectrumChanged = ImGui::SliderInt("##NumBuckets", &m_numSpectrumBuckets, 1, 100, "Num Spectrum Buckets: %i");
-		if (spectrumChanged)
+		int numSpectrumBuckets = m_audioEngine.getSpectrumBucketCount();
+		if (ImGui::SliderInt("##NumBuckets", &numSpectrumBuckets, 1, 100, "Num Spectrum Buckets: %i"))
 		{
-			for (auto& fftData : m_audioFFTData)
-			{
-				fftData.spectrumBuckets.clear();
-				fftData.spectrumBuckets.resize(m_numSpectrumBuckets);
-			}
+			m_audioEngine.setSpectrumBucketCount(numSpectrumBuckets);
 		}
-		// spectrumChanged = spectrumChanged || ImGui::SliderFloat("##PowerCurve", &m_spectrumPowerCurve, 0.0f, 10.0f, "Spectrum Power Curve: %.2f");
-		// if (spectrumChanged)
-		// {
-		// 	m_spectrumBuckets = calculateBuckets(m_numSpectrumBuckets, m_spectrumPowerCurve);
-		// 	// fmt::print("buckets: {}\n", m_spectrumBuckets);
-		// }
 
 		ImGui::SetNextItemWidth(currentWidth);
-		ImGui::SliderFloat("##Smoothing", &m_histogramSmoothing, 0.0f, 1.0f, "Histogram Smoothing: %.1f");
-		*/
 
+		float histogramSmoothing = m_audioEngine.getHistogramSmoothing();
+		if (ImGui::SliderFloat("##Smoothing", &histogramSmoothing, 0.0f, 1.0f, "Histogram Smoothing: %.1f"))
+		{
+			m_audioEngine.setHistogramSmoothing(histogramSmoothing);
+		}
 
 		ImGui::Columns(m_audioEngine.getSamplingSettings().numChannels);
 		for (unsigned int i = 0; i < m_audioEngine.getSamplingSettings().numChannels; ++i)
 		{
 			const auto& columnWidth = ImGui::GetColumnWidth();
-			// const auto& fftData = m_audioFFTData[i];
 
-			// const AudioEngine::Channel channel = AudioEngine::Channel(i);
-			const AudioEngine::Channel channel = static_cast<AudioEngine::Channel>(i);
+			const AudioEngine::Channel channel = AudioEngine::Channel(i);
 			const char* channelNameShort = channel == AudioEngine::Channel::Left ? "L" : "R";
 			const char* channelNameLong = channel == AudioEngine::Channel::Left ? "Left" : "Right";
 
@@ -404,7 +382,6 @@ void GLAudioVisApp::drawGUI()
 				ImVec2(columnWidth, 80)
 			);
 
-/*
 			// Raw DFT
 			m_audioEngine.plotDFT(
 				channel,
@@ -420,7 +397,6 @@ void GLAudioVisApp::drawGUI()
 				fmt::format("Histogram ({})", channelNameShort).c_str(),
 				ImVec2(columnWidth, 80)
 			);
-*/
 
 			ImGui::NextColumn();
 		}

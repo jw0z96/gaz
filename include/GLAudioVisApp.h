@@ -10,6 +10,7 @@
 
 #include "GLUtils/ShaderProgram.h"
 #include "GLUtils/VAO.h"
+#include "GLUtils/Texture.h"
 
 #include "AudioEngine.h"
 
@@ -37,7 +38,10 @@ private:
 			PA_SAMPLE_FLOAT32LE, // sample format
 		}),
 		m_outputShader{nullptr},
-		m_emptyVAO{nullptr}
+		m_emptyVAO{nullptr},
+		m_dftTexture{nullptr},
+		m_sampleCountDFT{32u},
+		m_sampleIndexDFT{0u}
 	{
 		fmt::print("GLAudioVisApp()\n");
 	}
@@ -99,6 +103,11 @@ private:
 
 	// Empty vao since we can't draw without one bound in core
 	std::unique_ptr<const GLUtils::VAO> m_emptyVAO;
+
+	// pretty pretty
+	std::unique_ptr<const GLUtils::Texture> m_dftTexture;
+	unsigned int m_sampleCountDFT;
+	unsigned int m_sampleIndexDFT;
 };
 
 }

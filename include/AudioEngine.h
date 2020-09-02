@@ -10,6 +10,8 @@
 
 #include <vector>
 #include <thread>
+#include <optional>
+#include <mutex>
 
 namespace gaz
 {
@@ -40,6 +42,8 @@ public:
 		m_recordingThread{nullptr},
 		m_numSpectrumBuckets{20},
 		m_fftData{},
+		m_dftOutputCombined{},
+		m_dftOutputReady{false},
 		m_histogramSmoothing{0.0f}
 	{
 		fmt::print("AudioEngine()\n");
@@ -96,7 +100,10 @@ public:
 	float getHistogramSmoothing() const { return m_histogramSmoothing; }
 
 	// Access for OpenGL buffers
-	const std::vector<float> getDFT(const Channel& channel) const;
+	const std::vector<float>& getDFT(const Channel& channel) const;
+
+	// returns a copy of the combined DFT, if it's ready
+	const std::optional<const std::vector<float>> requestDFT(/*const Channel& channel*/);
 
 private:
 
@@ -124,11 +131,16 @@ private:
 		fftw_complex* fftwOutput;
 		fftw_plan fftwPlan;
 		// Processed output data
+
+		// bool dftOutputChanged;
 		std::vector<float> dftOutputRaw;
 		std::vector<float> spectrumBuckets;
 	};
 
 	std::vector<FFTData> m_fftData;
+
+	std::vector<float> m_dftOutputCombined;
+	bool m_dftOutputReady;
 
 	float m_histogramSmoothing;
 };

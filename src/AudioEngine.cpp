@@ -123,6 +123,9 @@ bool AudioEngine::init()
 		data.spectrumBuckets.resize(m_numSpectrumBuckets);
 	}
 
+	// this is both channels, but half of the samples since only half are usable
+	m_dftOutputCombined.resize(m_samplingSettings.numSamples);
+
 	return true;
 }
 
@@ -174,29 +177,32 @@ void AudioEngine::startRecording()
 		}
 
 		// used for determining approx frequencies from the DFT sample index
-		static const float reciprocal = static_cast<float>(m_samplingSettings.sampleRate) / static_cast<float>(m_samplingSettings.numSamples);
+		// static const float reciprocal = static_cast<float>(m_samplingSettings.sampleRate) / static_cast<float>(m_samplingSettings.numSamples);
 
 		// put these on seperate threads?
 		for (auto& fftData : m_fftData)
 		{
 			// run the DFT
 			fftw_execute(fftData.fftwPlan);
-
+/*
 			// first lower the values in the buckets by the smoothing factor
 			for (auto& bucket : fftData.spectrumBuckets)
 			{
 				bucket *= m_histogramSmoothing;
 			}
-
+*/
 			// we only care about samples in the DFT that are below the nyquist frequency (midpoint)
-			for (unsigned int i = 0; i < (m_samplingSettings.numSamples / 2); ++i)
+			const auto numUsableSamples = m_samplingSettings.numSamples / 2;
+			const auto channelIndexOffset = numUsableSamples * static_cast<unsigned char>(fftData.channelID);
+			for (unsigned int i = 0; i < numUsableSamples; ++i)
 			{
 				const fftw_complex& sample = fftData.fftwOutput[i];
 				const float amplitude = 10.0f * log10(sample[0] * sample[0] + sample[1] * sample[1]);
 				// const float amplitude = sqrt(sample[0] * sample[0] + sample[1] * sample[1]);
 				// const float amplitude = sample[0] + sample[1]; // no need to sqrt
 				fftData.dftOutputRaw[i] = amplitude;
-
+				m_dftOutputCombined[channelIndexOffset + i] = amplitude;
+/*
 				// Frequency is approximate, based on the sample size, so it never fills the buckets properly :/
 				const float freq = log10(static_cast<float>(i) * reciprocal);
 				float t = (freq - minBucketFreqLog) / (maxBucketFreqLog - minBucketFreqLog);
@@ -204,7 +210,7 @@ void AudioEngine::startRecording()
 				fftData.spectrumBuckets[idx] = amplitude > fftData.spectrumBuckets[idx] ?
 					amplitude :
 					fftData.spectrumBuckets[idx];
-
+*/
 				// for (int j = 0; j < m_numSpectrumBuckets; ++j)
 				// {
 				// 	// freqBuckets is sized m_numSpectrumBuckets + 1, so this is safe
@@ -218,6 +224,8 @@ void AudioEngine::startRecording()
 				// }
 			}
 		}
+
+		m_dftOutputReady = true;
 
 		// std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 
@@ -335,7 +343,21 @@ void AudioEngine::setSpectrumBucketCount(unsigned int bucketCount)
 	}
 }
 
-const std::vector<float> AudioEngine::getDFT(const Channel& channel) const
+const std::vector<float>& AudioEngine::getDFT(const Channel& channel) const
 {
 	return m_fftData[static_cast<unsigned char>(channel)].dftOutputRaw;
+}
+
+const std::optional<const std::vector<float>> AudioEngine::requestDFT(/*const Channel& channel*/)
+{
+	// auto& fftData = m_fftData[static_cast<unsigned char>(channel)];
+
+	if (m_dftOutputReady)
+	{
+		const auto dftCopy = m_dftOutputCombined;
+		m_dftOutputReady = false;
+		return dftCopy;
+	}
+
+	return {};
 }

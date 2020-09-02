@@ -213,6 +213,36 @@ bool GLAudioVisApp::initDrawingPipeline()
 	m_emptyVAO = std::make_unique<const GLUtils::VAO>();
 	m_emptyVAO->bind();
 
+	// dft texture will occupy shader unit 0
+	glActiveTexture(GL_TEXTURE0);
+	glUniform1i(m_outputShader->getUniformLocation("dftTexture"), 0);
+	glUniform1ui(m_outputShader->getUniformLocation("dftLastIndex"), m_sampleIndexDFT);
+	glUniform1ui(m_outputShader->getUniformLocation("dftSampleCount"), m_sampleCountDFT);
+
+	m_dftTexture = std::make_unique<const GLUtils::Texture>();
+	m_dftTexture->bindAs(GL_TEXTURE_2D_ARRAY);
+
+	// Float texture, [dftSize * numChannels]
+	glTexImage3D(
+		GL_TEXTURE_2D_ARRAY,
+		0,
+		GL_R32F,
+		m_audioEngine.getSamplingSettings().numSamples / 2,
+		m_audioEngine.getSamplingSettings().numChannels,
+		m_sampleCountDFT,
+		0,
+		GL_RED,
+		GL_FLOAT,
+		nullptr
+	);
+
+	glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_MIRRORED_REPEAT);
+	glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_REPEAT); // doesn't matter
+	glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	// glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	// glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
 	glDisable(GL_DEPTH_TEST);
 
 	return true;
@@ -276,17 +306,72 @@ void GLAudioVisApp::drawFrame()
 
 	m_outputShader->use();
 
+	glActiveTexture(GL_TEXTURE0);
+	m_dftTexture->bindAs(GL_TEXTURE_2D_ARRAY);
+
 	// TODO: SoA rather than AoS?
+	if (m_audioEngine.isRecordingActive())
 	{
 		GLUtils::scopedTimer(uniformTimer);
 
-		static const auto dftLeftLoc = m_outputShader->getUniformLocation("u_dftLeft[0]");
-		const auto leftDFT = m_audioEngine.getDFT(AudioEngine::Channel::Left);
-		glUniform1fv(dftLeftLoc, leftDFT.size(), leftDFT.data());
+		// Ask AudioEngine for DFT Samples, upload them if it's got one
+		// AudioEngine should not give the same sample twice, so we don't repeat uploads
 
-		static const auto dftRightLoc = m_outputShader->getUniformLocation("u_dftRight[0]");
-		const auto rightDFT = m_audioEngine.getDFT(AudioEngine::Channel::Right);
-		glUniform1fv(dftRightLoc, rightDFT.size(), rightDFT.data());
+		static const auto dftIndexLoc = m_outputShader->getUniformLocation("dftLastIndex");
+
+		const auto dftSample = m_audioEngine.requestDFT(/*AudioEngine::Channel::Left*/);
+
+		if (dftSample.has_value())
+		{
+			glTexSubImage3D(
+				GL_TEXTURE_2D_ARRAY,
+				0,
+				0, // x offset
+				0, // left
+				m_sampleIndexDFT,
+				m_audioEngine.getSamplingSettings().numSamples / 2,
+				m_audioEngine.getSamplingSettings().numChannels, // both channels are combined in the sample
+				1,
+				GL_RED,
+				GL_FLOAT,
+				dftSample.value().data()
+			);
+
+			glUniform1ui(dftIndexLoc, m_sampleIndexDFT);
+
+			m_sampleIndexDFT = (m_sampleIndexDFT + 1) % m_sampleCountDFT;
+
+			fmt::print("dft sample consumed\n");
+		}
+		else
+		{
+			fmt::print("dft sample not ready!\n");
+		}
+/*
+		// index on this one is messed up
+		const auto dftSampleRight = m_audioEngine.requestDFT(AudioEngine::Channel::Right);
+		if (dftSampleRight.has_value())
+		{
+			glTexSubImage3D(
+				GL_TEXTURE_2D_ARRAY,
+				0,
+				0, // x offset
+				1, // right
+				m_sampleIndexDFT,
+				m_audioEngine.getSamplingSettings().numSamples / 2,
+				1,
+				1,
+				GL_RED,
+				GL_FLOAT,
+				dftSampleRight.value().data()
+			);
+
+			glUniform1ui(dftIndexLoc, m_sampleIndexDFT);
+
+			m_sampleIndexDFT = (m_sampleIndexDFT + 1) % m_sampleCountDFT;
+
+		}
+*/
 	}
 
 	// The vertex shader will create a screen space quad, so no need to bind a different VAO & VBO
@@ -348,7 +433,7 @@ void GLAudioVisApp::drawGUI()
 		{
 			m_audioEngine.toggleRecording();
 		}
-
+/*
 		int numSpectrumBuckets = m_audioEngine.getSpectrumBucketCount();
 		if (ImGui::SliderInt("##NumBuckets", &numSpectrumBuckets, 1, 100, "Num Spectrum Buckets: %i"))
 		{
@@ -362,7 +447,7 @@ void GLAudioVisApp::drawGUI()
 		{
 			m_audioEngine.setHistogramSmoothing(histogramSmoothing);
 		}
-
+*/
 		ImGui::Columns(m_audioEngine.getSamplingSettings().numChannels);
 		for (unsigned int i = 0; i < m_audioEngine.getSamplingSettings().numChannels; ++i)
 		{
@@ -390,13 +475,13 @@ void GLAudioVisApp::drawGUI()
 				ImVec2(columnWidth, 80)
 			);
 
-			// Histogram
-			m_audioEngine.plotSpectrum(
-				channel,
-				fmt::format("##AudioHistogram{}", channelNameShort).c_str(),
-				fmt::format("Histogram ({})", channelNameShort).c_str(),
-				ImVec2(columnWidth, 80)
-			);
+			// // Histogram
+			// m_audioEngine.plotSpectrum(
+			// 	channel,
+			// 	fmt::format("##AudioHistogram{}", channelNameShort).c_str(),
+			// 	fmt::format("Histogram ({})", channelNameShort).c_str(),
+			// 	ImVec2(columnWidth, 80)
+			// );
 
 			ImGui::NextColumn();
 		}

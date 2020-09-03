@@ -28,7 +28,7 @@ void OrbitalCamera::processInput(const SDL_Event& event)
 	// mouse sensitivity multiplier for the camera rotation control
 	constexpr float s_mouseSensitivity = 0.001f;
 	// scroll sensitivity multiplier for the camera distance control
-	constexpr float s_scrollSensitivity = 1.0f;
+	constexpr float s_scrollSensitivity = 0.1f;
 
 	switch(event.type)
 	{

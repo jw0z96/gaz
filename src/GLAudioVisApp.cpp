@@ -325,8 +325,6 @@ void GLAudioVisApp::run()
 
 void GLAudioVisApp::processEvent(const SDL_Event& event)
 {
-	// pass through to m_audioEngine?
-
 	if(event.type == SDL_WINDOWEVENT &&
 		(event.window.event == SDL_WINDOWEVENT_RESIZED ||
 			event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED))
@@ -340,6 +338,10 @@ void GLAudioVisApp::processEvent(const SDL_Event& event)
 			GL_FALSE,
 			glm::value_ptr(m_camera.getProjection())
 		);
+	}
+	else if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_SPACE)
+	{
+		m_audioEngine.toggleRecording();
 	}
 
 	m_camera.processInput(event);

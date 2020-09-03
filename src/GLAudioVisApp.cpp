@@ -213,6 +213,7 @@ bool GLAudioVisApp::initDrawingPipeline()
 
 	m_outputShader->use();
 
+	// We need at least one VAO created and bound in core opengl
 	m_emptyVAO = std::make_unique<const GLUtils::VAO>();
 	m_emptyVAO->bind();
 
@@ -222,14 +223,12 @@ bool GLAudioVisApp::initDrawingPipeline()
 	glUniform1ui(m_outputShader->getUniformLocation("dftSampleCount"), m_sampleCountDFT);
 	glUniform3ui(
 		m_outputShader->getUniformLocation("cubeDimensions"),
-		// 32, 32, 32
-		64, 64, 64
-		// 128, 128, 128
+		m_cubeResolution, m_cubeResolution, m_cubeResolution
 	);
 
 	// set projection
 	m_camera.setDistance(5.0f);
-	// m_camera.setCenter({0.5f, 0.5f, 0.5f});
+	m_camera.setFOV(22.5f);
 	m_camera.setAspect(DEFAULT_SCREEN_WIDTH, DEFAULT_SCREEN_HEIGHT);
 	glUniformMatrix4fv(
 		m_outputShader->getUniformLocation("projection"),
@@ -245,14 +244,14 @@ bool GLAudioVisApp::initDrawingPipeline()
 	m_dftTexture = std::make_unique<const GLUtils::Texture>();
 	m_dftTexture->bindAs(GL_TEXTURE_3D);
 
-	// Float texture, [dftSize * numChannels]
+	// Float texture, [dftSize * numChannels * m_sampleCountDFT]
 	glTexImage3D(
 		GL_TEXTURE_3D,
 		0,
 		GL_R32F,
 		m_audioEngine.getSamplingSettings().numSamples / 2,
 		m_audioEngine.getSamplingSettings().numChannels,
-		m_sampleCountDFT,
+		m_sampleCountDFT, // acts as a trail of samples
 		0,
 		GL_RED,
 		GL_FLOAT,
@@ -385,17 +384,17 @@ void GLAudioVisApp::drawFrame()
 				dftSample.value().data()
 			);
 
-
+			// this should go after the uniform update, but seems to work better before?
 			m_sampleIndexDFT = (m_sampleIndexDFT + 1) % m_sampleCountDFT;
 
 			glUniform1ui(dftIndexLoc, m_sampleIndexDFT);
 
-			fmt::print("dft sample consumed\n");
+			// fmt::print("dft sample consumed\n");
 		}
-		else
-		{
-			fmt::print("dft sample not ready!\n");
-		}
+		// else
+		// {
+		// 	fmt::print("dft sample not ready!\n");
+		// }
 	}
 
 	static const auto viewLoc = m_outputShader->getUniformLocation("view");
@@ -406,10 +405,8 @@ void GLAudioVisApp::drawFrame()
 		glm::value_ptr(m_camera.getView())
 	);
 
-	// The vertex shader will create a screen space quad, so no need to bind a different VAO & VBO
-	// constexpr unsigned int pointCount = 32 * 32 * 32;
-	constexpr unsigned int pointCount = 64 * 64 * 64;
-	// constexpr unsigned int pointCount = 128 * 128 * 128;
+	// The vertex shader will create the vertices, so don't worry which VAO is bound
+	static const unsigned int pointCount = m_cubeResolution * m_cubeResolution * m_cubeResolution;
 	glDrawArrays(GL_POINTS, 0, pointCount);
 }
 

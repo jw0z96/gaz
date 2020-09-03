@@ -43,6 +43,7 @@ private:
 		m_dftTexture{nullptr},
 		m_sampleCountDFT{32u},
 		m_sampleIndexDFT{0u},
+		m_cubeResolution{64},
 		m_camera()
 	{
 		fmt::print("GLAudioVisApp()\n");
@@ -100,16 +101,23 @@ private:
 	// Audio Engine which does recording, fft, on a seperate thread
 	AudioEngine m_audioEngine;
 
-	// pretty pretty
+	// Shader for the point cloud cube
 	std::unique_ptr<const GLUtils::ShaderProgram> m_outputShader;
 
 	// Empty vao since we can't draw without one bound in core
 	std::unique_ptr<const GLUtils::VAO> m_emptyVAO;
 
-	// pretty pretty
+	// Texture object to store DFT output
 	std::unique_ptr<const GLUtils::Texture> m_dftTexture;
+
+	// The number of DFT samples to store in a 3d texture, to act as a 'trail'
 	unsigned int m_sampleCountDFT;
+
+	// The index of the 2d texture 'slice' of the 3d texture to write into
 	unsigned int m_sampleIndexDFT;
+
+	// Cube visualisation resolution
+	unsigned int m_cubeResolution;
 
 	// Camera
 	OrbitalCamera m_camera;

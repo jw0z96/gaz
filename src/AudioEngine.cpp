@@ -149,7 +149,7 @@ void AudioEngine::startRecording()
 
 	while (m_recordingActive)
 	{
-		const auto startTime = std::chrono::system_clock::now();
+		// const auto startTime = std::chrono::system_clock::now();
 
 		// This will block for a fixed amount of time
 		int error;
@@ -229,11 +229,11 @@ void AudioEngine::startRecording()
 
 		// std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 
-		const auto endTime = std::chrono::system_clock::now();
-		fmt::print("AudioEngine::startRecording::elapsed: recorded {} bytes ({}ms)\n",
-			m_sampleBuffer.size(),
-			std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime).count()
-		);
+		// const auto endTime = std::chrono::system_clock::now();
+		// fmt::print("AudioEngine::startRecording::elapsed: recorded {} bytes ({}ms)\n",
+		// 	m_sampleBuffer.size(),
+		// 	std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime).count()
+		// );
 	}
 
 	fmt::print("AudioEngine::startRecording::end\n");

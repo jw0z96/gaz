@@ -219,14 +219,17 @@ bool GLAudioVisApp::initDrawingPipeline()
 	// set shader uniform
 	glUniform1i(m_outputShader->getUniformLocation("dftTexture"), 0);
 	glUniform1ui(m_outputShader->getUniformLocation("dftLastIndex"), m_sampleIndexDFT);
+	glUniform1ui(m_outputShader->getUniformLocation("dftSampleCount"), m_sampleCountDFT);
 	glUniform3ui(
 		m_outputShader->getUniformLocation("cubeDimensions"),
-		32, 32, 32
+		// 32, 32, 32
+		64, 64, 64
+		// 128, 128, 128
 	);
 
 	// set projection
 	m_camera.setDistance(5.0f);
-	m_camera.setCenter({0.5f, 0.5f, 0.5f});
+	// m_camera.setCenter({0.5f, 0.5f, 0.5f});
 	m_camera.setAspect(DEFAULT_SCREEN_WIDTH, DEFAULT_SCREEN_HEIGHT);
 	glUniformMatrix4fv(
 		m_outputShader->getUniformLocation("projection"),
@@ -256,8 +259,8 @@ bool GLAudioVisApp::initDrawingPipeline()
 		nullptr
 	);
 
-	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_MIRRORED_REPEAT);
-	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_REPEAT); // doesn't matter
+	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER); // doesn't matter
 	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_BORDER); // does matter
 	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	// glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -268,6 +271,10 @@ bool GLAudioVisApp::initDrawingPipeline()
 	glEnable(GL_PROGRAM_POINT_SIZE);
 
 	glDisable(GL_DEPTH_TEST);
+	// glEnable(GL_DEPTH_TEST);
+
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_ONE, GL_ONE);
 
 	return true;
 }
@@ -343,7 +350,7 @@ void GLAudioVisApp::drawFrame()
 {
 	GLUtils::scopedTimer(frameTimer);
 
-	glClear(GL_COLOR_BUFFER_BIT);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 	m_outputShader->use();
 
@@ -378,9 +385,10 @@ void GLAudioVisApp::drawFrame()
 				dftSample.value().data()
 			);
 
-			glUniform1ui(dftIndexLoc, m_sampleIndexDFT);
 
 			m_sampleIndexDFT = (m_sampleIndexDFT + 1) % m_sampleCountDFT;
+
+			glUniform1ui(dftIndexLoc, m_sampleIndexDFT);
 
 			fmt::print("dft sample consumed\n");
 		}
@@ -399,7 +407,9 @@ void GLAudioVisApp::drawFrame()
 	);
 
 	// The vertex shader will create a screen space quad, so no need to bind a different VAO & VBO
-	constexpr unsigned int pointCount = 32 * 32 * 32;
+	// constexpr unsigned int pointCount = 32 * 32 * 32;
+	constexpr unsigned int pointCount = 64 * 64 * 64;
+	// constexpr unsigned int pointCount = 128 * 128 * 128;
 	glDrawArrays(GL_POINTS, 0, pointCount);
 }
 

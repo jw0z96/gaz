@@ -27,16 +27,19 @@ void main()
 
 	xyz = vec3(x, y, z);
 
-	vec4 transformedPos = projection * view * vec4(xyz, 1.0f);
-	// vec4 transformedPos = vec4(x, y, z, 1.0);
+	// add half step offset
+	xyz += vec3(0.5f) / cubeDimensions;
+
+	// apply transforms & center the cube
+	vec4 transformedPos = projection * view * vec4(xyz - vec3(0.5f), 1.0f);
 
 	gl_Position = transformedPos;
-	gl_PointSize = 10.0f / gl_Position.w; // shitty size attenuation
+	gl_PointSize = 20.0f / gl_Position.w; // shitty size attenuation
 
-	vec3 uvw = xyz;
-	// uvw.z = mod(uvw.z - (float(dftLastIndex) / 31.0f), 1.0f);
+	vec3 uvw = xyz.yxz;
+	uvw.z = mod(uvw.z + (float(dftLastIndex) / float(dftSampleCount)), 1.0f);
 
-	amplitude = texture(dftTexture, uvw).r; // / 48.0f;
+	amplitude = texture(dftTexture, uvw).r / 24.0f;
 
 	// effectively 'discard' the point
 	if (amplitude < 0.1f) // maybe this check can be earlier

@@ -15,6 +15,13 @@ out vec4 fragColour;
 
 void main()
 {
+	// effectively 'discard' the point
+	if (amplitude < 0.1f) // maybe this check can be earlier
+	{
+		discard;
+	}
+
+
 	// vec2 logUV = uv;
 	// // logUV.x = pow(logUV.x, 2.0f);
 	// // logUV.x = sin(logUV.x * (1.0f - (3.14159 / 2.0f)));
@@ -42,6 +49,20 @@ void main()
 	// fragColour = vec4(vec3(uv, 1.0f) * amp, 1.0f);
 	// fragColour = vec4(uv, 0.0f, 1.0f);
 
+	// // float delta = 0.5f;
+	// // // // float alpha = 1.0f - smoothstep(1.0f - delta, 1.0f + delta, length(gl_PointCoord - vec2(0.5)));
+	// // float alpha = 1.0f - smoothstep(1.0f - delta, 1.0f + delta, dot(cxy, cxy));
+	// if (dot(cxy, cxy) > 1.0)
+	// {
+	// 	discard;
+	// }
 
-	fragColour = vec4(xyz * amplitude, 0.5);
+	float intensity = min(amplitude, 1.0f) * xyz.z;
+
+	vec2 cxy = 2.0f * gl_PointCoord - 1.0f;
+	float falloff = 1.0f - dot(cxy, cxy);
+
+
+	fragColour = vec4(xyz * intensity * falloff, 1.0f);
+	// fragColour = vec4(xyz, 0.5);
 }
